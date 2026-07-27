@@ -1,0 +1,512 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum ItemType {
+  Product
+  Material
+}
+
+enum StockCondition {
+  New
+  Repair_Good
+  Repair
+  Scrap
+  Material
+}
+
+enum StockTransactionType {
+  Opening
+  Inbound
+  Outbound
+  Prepared
+  Move
+  Adjustment_In
+  Adjustment_Out
+  Return_to_Repair
+  Transfer_Out
+  Transfer_In
+}
+
+enum SerialStatus {
+  In_Stock
+  Prepared
+  Outbound
+  In_Transit
+  Repair
+  Scrapped
+}
+
+enum OutboundStatus {
+  Draft
+  Ready
+  Prepared
+  Partially_Prepared
+  Ready_for_Pickup
+  Outbound
+  Cancelled
+  Exception
+}
+
+enum TransferStatus {
+  Draft
+  Prepared
+  Dispatched
+  In_Transit
+  Partially_Received
+  Received
+  Cancelled
+  Exception
+}
+
+enum ERPStatus {
+  Pending
+  Synced
+  Failed
+  Retrying
+  Manual_Review
+}
+
+enum ExceptionSeverity {
+  Low
+  Medium
+  High
+  Critical
+}
+
+enum ExceptionStatus {
+  Open
+  Investigating
+  Resolved
+}
+
+enum StocktakeStatus {
+  Draft
+  Counting
+  Review
+  Approved
+  Posted
+  Cancelled
+}
+
+model Warehouse {
+  id                 String                @id @default(cuid())
+  code               String                @unique
+  name               String
+  timezone           String
+  active             Boolean               @default(true)
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+  locations          Location[]
+  containers         Container[]
+  balances           InventoryBalance[]
+  transactions       StockTransaction[]
+  serials            SerialNumber[]
+  outboundOrders     OutboundOrder[]
+  sourceTransfers    TransferOrder[]       @relation("TransferSource")
+  destinationTransfers TransferOrder[]     @relation("TransferDestination")
+  pickupSequence     PickupSequence?
+  stocktakes         Stocktake[]
+  erpMappings        ERPWarehouseMapping[]
+}
+
+model Location {
+  id                 String                @id @default(cuid())
+  warehouseId        String
+  code               String
+  zone               String
+  rack               String?
+  row                Int?
+  bay                Int?
+  side               String?
+  serviceZone        Boolean               @default(false)
+  active             Boolean               @default(true)
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+  warehouse          Warehouse             @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  balances           InventoryBalance[]
+  serials            SerialNumber[]
+  sourceTransactions StockTransaction[]    @relation("TransactionSourceLocation")
+  targetTransactions StockTransaction[]    @relation("TransactionTargetLocation")
+  allocations        OutboundAllocation[]
+  repairReturns      RepairReturn[]
+  transferReceipts   TransferOrder[]        @relation("TransferDestinationLocation")
+
+  @@unique([warehouseId, code])
+  @@index([warehouseId, active])
+}
+
+model Product {
+  id                     String                @id @default(cuid())
+  sku                    String                @unique
+  model                  String
+  itemType               ItemType
+  category               String?
+  serialTrackingRequired Boolean               @default(false)
+  reportCategory         String?
+  active                 Boolean               @default(true)
+  createdAt              DateTime              @default(now())
+  updatedAt              DateTime              @updatedAt
+  balances               InventoryBalance[]
+  transactions           StockTransaction[]
+  serials                SerialNumber[]
+  outboundLines          OutboundOrderLine[]
+  repairReturns          RepairReturn[]
+  transferLines          TransferOrderLine[]
+  stocktakeLines         StocktakeLine[]
+
+  @@index([model])
+  @@index([itemType, active])
+}
+
+model Container {
+  id          String             @id @default(cuid())
+  code        String
+  warehouseId String
+  active      Boolean            @default(true)
+  createdAt   DateTime           @default(now())
+  warehouse   Warehouse          @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  balances    InventoryBalance[]
+  transactions StockTransaction[]
+
+  @@unique([warehouseId, code])
+}
+
+model InventoryBalance {
+  id             String          @id @default(cuid())
+  warehouseId    String
+  locationId     String
+  containerId    String?
+  productId      String?
+  itemType       ItemType
+  condition      StockCondition
+  physicalQty    Decimal         @default(0) @db.Decimal(18, 3)
+  frozenQty      Decimal         @default(0) @db.Decimal(18, 3)
+  inTransitQty   Decimal         @default(0) @db.Decimal(18, 3)
+  version        Int             @default(0)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  warehouse      Warehouse       @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  location       Location        @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  container      Container?      @relation(fields: [containerId], references: [id], onDelete: Restrict)
+  product        Product?        @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([warehouseId, locationId])
+  @@index([productId, condition])
+}
+
+model StockTransaction {
+  id                 String               @id @default(cuid())
+  transactionType    StockTransactionType
+  warehouseId        String
+  sourceLocationId   String?
+  targetLocationId   String?
+  containerId        String?
+  productId          String?
+  serialNumberId     String?
+  itemType           ItemType
+  condition          StockCondition
+  quantity           Decimal              @db.Decimal(18, 3)
+  physicalDelta      Decimal              @default(0) @db.Decimal(18, 3)
+  frozenDelta        Decimal              @default(0) @db.Decimal(18, 3)
+  inTransitDelta     Decimal              @default(0) @db.Decimal(18, 3)
+  businessReference String?
+  operationId        String
+  reason             String?
+  remark             String
+  occurredAt         DateTime             @default(now())
+  createdById        String
+  warehouse          Warehouse            @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  sourceLocation     Location?            @relation("TransactionSourceLocation", fields: [sourceLocationId], references: [id], onDelete: Restrict)
+  targetLocation     Location?            @relation("TransactionTargetLocation", fields: [targetLocationId], references: [id], onDelete: Restrict)
+  container          Container?           @relation(fields: [containerId], references: [id], onDelete: Restrict)
+  product            Product?             @relation(fields: [productId], references: [id], onDelete: Restrict)
+  serialNumber       SerialNumber?        @relation(fields: [serialNumberId], references: [id], onDelete: Restrict)
+  createdBy          User                 @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([occurredAt])
+  @@index([warehouseId, occurredAt])
+  @@index([productId, occurredAt])
+  @@index([businessReference])
+  @@index([operationId])
+}
+
+model SerialNumber {
+  id                    String               @id @default(cuid())
+  serialNumber          String               @unique
+  productId             String
+  currentWarehouseId    String?
+  currentLocationId     String?
+  condition             StockCondition
+  status                SerialStatus
+  sourceDocument        String?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  product               Product              @relation(fields: [productId], references: [id], onDelete: Restrict)
+  currentWarehouse      Warehouse?           @relation(fields: [currentWarehouseId], references: [id], onDelete: Restrict)
+  currentLocation       Location?            @relation(fields: [currentLocationId], references: [id], onDelete: Restrict)
+  transactions          StockTransaction[]
+  outboundAllocations   OutboundAllocation[]
+  repairReturns         RepairReturn[]
+  transferSerials       TransferSerial[]
+
+  @@index([productId, status])
+  @@index([currentWarehouseId, currentLocationId])
+}
+
+model OutboundOrder {
+  id              String              @id @default(cuid())
+  shNo            String              @unique
+  pickupCode      String?             @unique
+  erpWarehouse    String
+  warehouseId     String
+  status          OutboundStatus
+  erpSyncStatus   ERPStatus           @default(Pending)
+  customerLabel   String?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  warehouse       Warehouse           @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  lines           OutboundOrderLine[]
+  erpDocuments    ERPDocument[]
+  syncJobs        ERPSyncJob[]
+
+  @@index([warehouseId, status])
+  @@index([createdAt])
+}
+
+model OutboundOrderLine {
+  id                String               @id @default(cuid())
+  outboundOrderId   String
+  productId         String
+  requiredQty       Decimal              @db.Decimal(18, 3)
+  requiredCondition StockCondition
+  allocatedQty      Decimal              @default(0) @db.Decimal(18, 3)
+  preparedQty       Decimal              @default(0) @db.Decimal(18, 3)
+  dispatchedQty     Decimal              @default(0) @db.Decimal(18, 3)
+  outboundOrder     OutboundOrder        @relation(fields: [outboundOrderId], references: [id], onDelete: Cascade)
+  product           Product              @relation(fields: [productId], references: [id], onDelete: Restrict)
+  allocations       OutboundAllocation[]
+
+  @@index([outboundOrderId])
+}
+
+model OutboundAllocation {
+  id                  String            @id @default(cuid())
+  outboundOrderLineId String
+  locationId          String
+  serialNumberId      String?
+  quantity            Decimal           @db.Decimal(18, 3)
+  preparedAt          DateTime?
+  dispatchedAt        DateTime?
+  createdAt           DateTime          @default(now())
+  outboundOrderLine   OutboundOrderLine @relation(fields: [outboundOrderLineId], references: [id], onDelete: Cascade)
+  location            Location          @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  serialNumber        SerialNumber?     @relation(fields: [serialNumberId], references: [id], onDelete: Restrict)
+
+  @@index([outboundOrderLineId])
+  @@index([locationId])
+}
+
+model RepairReturn {
+  id               String        @id @default(cuid())
+  serialNumberId   String
+  productId        String
+  locationId       String
+  relatedShNo      String?
+  erpMatched       Boolean       @default(false)
+  manualReview     Boolean       @default(false)
+  receivedAt       DateTime      @default(now())
+  remark           String
+  serialNumber     SerialNumber  @relation(fields: [serialNumberId], references: [id], onDelete: Restrict)
+  product          Product       @relation(fields: [productId], references: [id], onDelete: Restrict)
+  location         Location      @relation(fields: [locationId], references: [id], onDelete: Restrict)
+
+  @@index([relatedShNo])
+  @@index([receivedAt])
+}
+
+model PickupSequence {
+  warehouseId String    @id
+  nextValue   Int       @default(1)
+  updatedAt   DateTime  @updatedAt
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+}
+
+model ERPWarehouseMapping {
+  id           String         @id @default(cuid())
+  warehouseId  String
+  erpWarehouse String
+  condition    StockCondition
+  active       Boolean        @default(true)
+  warehouse    Warehouse      @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+
+  @@unique([warehouseId, erpWarehouse])
+}
+
+model ERPDocument {
+  id              String         @id @default(cuid())
+  documentType    String
+  externalNumber  String
+  payload         Json
+  syncStatus      ERPStatus      @default(Pending)
+  outboundOrderId String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  outboundOrder   OutboundOrder? @relation(fields: [outboundOrderId], references: [id], onDelete: SetNull)
+
+  @@unique([documentType, externalNumber])
+}
+
+model ERPSyncJob {
+  id              String         @id @default(cuid())
+  operationType   String
+  entityType      String
+  entityId        String
+  payload         Json
+  status          ERPStatus      @default(Pending)
+  attempts        Int            @default(0)
+  lastError       String?
+  nextAttemptAt   DateTime?
+  outboundOrderId String?
+  transferOrderId String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  outboundOrder   OutboundOrder? @relation(fields: [outboundOrderId], references: [id], onDelete: SetNull)
+  transferOrder   TransferOrder? @relation(fields: [transferOrderId], references: [id], onDelete: SetNull)
+
+  @@index([status, nextAttemptAt])
+}
+
+model TransferOrder {
+  id                    String              @id @default(cuid())
+  transferNo            String              @unique
+  sourceWarehouseId     String
+  destinationWarehouseId String
+  destinationLocationId String?
+  status                TransferStatus
+  erpSyncStatus         ERPStatus           @default(Pending)
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+  sourceWarehouse       Warehouse           @relation("TransferSource", fields: [sourceWarehouseId], references: [id], onDelete: Restrict)
+  destinationWarehouse  Warehouse           @relation("TransferDestination", fields: [destinationWarehouseId], references: [id], onDelete: Restrict)
+  destinationLocation   Location?           @relation("TransferDestinationLocation", fields: [destinationLocationId], references: [id], onDelete: Restrict)
+  lines                 TransferOrderLine[]
+  syncJobs              ERPSyncJob[]
+
+  @@index([sourceWarehouseId, status])
+  @@index([destinationWarehouseId, status])
+}
+
+model TransferOrderLine {
+  id              String           @id @default(cuid())
+  transferOrderId String
+  productId       String
+  condition       StockCondition
+  quantity        Decimal          @db.Decimal(18, 3)
+  receivedQty     Decimal          @default(0) @db.Decimal(18, 3)
+  transferOrder   TransferOrder    @relation(fields: [transferOrderId], references: [id], onDelete: Cascade)
+  product         Product          @relation(fields: [productId], references: [id], onDelete: Restrict)
+  serials         TransferSerial[]
+}
+
+model TransferSerial {
+  id                  String            @id @default(cuid())
+  transferOrderLineId String
+  serialNumberId      String
+  dispatchedAt        DateTime?
+  receivedAt          DateTime?
+  transferOrderLine   TransferOrderLine @relation(fields: [transferOrderLineId], references: [id], onDelete: Cascade)
+  serialNumber        SerialNumber      @relation(fields: [serialNumberId], references: [id], onDelete: Restrict)
+
+  @@unique([transferOrderLineId, serialNumberId])
+}
+
+model Stocktake {
+  id            String          @id @default(cuid())
+  stocktakeNo   String          @unique
+  warehouseId   String
+  scope         Json
+  status        StocktakeStatus
+  snapshotAt    DateTime
+  approvedById  String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  warehouse     Warehouse       @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  approvedBy    User?           @relation("StocktakeApprover", fields: [approvedById], references: [id], onDelete: Restrict)
+  lines         StocktakeLine[]
+
+  @@index([warehouseId, status])
+}
+
+model StocktakeLine {
+  id           String         @id @default(cuid())
+  stocktakeId  String
+  productId    String?
+  locationCode String
+  condition    StockCondition
+  expectedQty  Decimal        @db.Decimal(18, 3)
+  frozenQty    Decimal        @default(0) @db.Decimal(18, 3)
+  countedQty   Decimal?       @db.Decimal(18, 3)
+  serials      String[]
+  remark       String?
+  stocktake    Stocktake      @relation(fields: [stocktakeId], references: [id], onDelete: Cascade)
+  product      Product?       @relation(fields: [productId], references: [id], onDelete: Restrict)
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  permissions String[]
+  users       User[]
+}
+
+model User {
+  id           String             @id @default(cuid())
+  email        String             @unique
+  displayName  String
+  roleId       String
+  active       Boolean            @default(true)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  role         Role               @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  transactions StockTransaction[]
+  auditLogs    AuditLog[]
+  approvedStocktakes Stocktake[]  @relation("StocktakeApprover")
+}
+
+model AuditLog {
+  id                String   @id @default(cuid())
+  userId            String
+  operation         String
+  entityType        String
+  entityId          String
+  before            Json?
+  after             Json?
+  businessReference String?
+  remark            String
+  createdAt         DateTime @default(now())
+  user              User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([createdAt])
+  @@index([entityType, entityId])
+  @@index([businessReference])
+}
+
+model Exception {
+  id              String            @id @default(cuid())
+  type            String
+  severity        ExceptionSeverity
+  entityReference String
+  message         String
+  status          ExceptionStatus   @default(Open)
+  createdAt       DateTime          @default(now())
+  resolvedAt      DateTime?
+
+  @@index([status, severity])
+  @@index([createdAt])
+}
