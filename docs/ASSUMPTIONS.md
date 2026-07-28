@@ -18,5 +18,7 @@ The validated Sydney workbook was inspected as read-only business evidence. The 
 - Product master contains Material rows with `Report Machine Flag = Yes`; `reportMachine` cannot be inferred from item type.
 - Rows using SKU `坏机`, Qty 99 and a remark that they only display physical-location occupancy are spreadsheet visualisation placeholders. They are excluded from balances, movements and reconciliation truth.
 - Historical incomplete original faulty records are classified as legacy traceability gaps. Current discrepancies remain current operational errors.
+- Only balances explicitly marked `legacySerialGap` receive legacy shortage classification. The flag does not permit SN registration beyond Physical Qty.
+- Returned_Unrepaired means the faulty unit was returned from the repair activity without becoming usable stock. It remains Repair/Repair; `returnedToStockAt` stays null.
 
 Until explicit cutover approval, the workbook remains the production operational reference and WMS is a shadow system. Reconciliation reports differences but never overwrites either source.

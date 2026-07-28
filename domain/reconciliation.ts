@@ -1,3 +1,6 @@
+import { isPhysicallyPresentSerialStatus } from "./serial-policy";
+import type { SerialStatus } from "./types";
+
 export type ReconciliationStatus =
   | "MATCH"
   | "MISSING_IN_WMS"
@@ -8,7 +11,10 @@ export type ReconciliationStatus =
   | "SN_MISSING_IN_WMS"
   | "SN_WRONG_LOCATION"
   | "SN_WRONG_CONDITION"
-  | "SN_STATUS_MISMATCH";
+  | "SN_STATUS_MISMATCH"
+  | "SERIAL_COUNT_MATCH"
+  | "SERIAL_COUNT_SHORTAGE"
+  | "SERIAL_COUNT_EXCESS";
 
 export interface ReconciliationRow {
   warehouse?: string;
@@ -124,5 +130,76 @@ export function reconcileSerials(
     if (wms.status !== ledger.status)
       return { status: "SN_STATUS_MISMATCH", ledger, wms, classification };
     return { status: "MATCH", ledger, wms, classification: "MATCH" };
+  });
+}
+
+export interface SerialCountBalance {
+  balanceId: string;
+  productId: string;
+  sku: string;
+  warehouse: string;
+  location: string;
+  condition: string;
+  physicalQty: number;
+  legacySerialGap?: boolean;
+}
+
+export interface PhysicalSerialIdentity {
+  productId: string;
+  warehouse?: string;
+  location?: string;
+  condition: string;
+  status: SerialStatus;
+}
+
+export interface SerialCountReconciliationResult {
+  status: Extract<
+    ReconciliationStatus,
+    "SERIAL_COUNT_MATCH" | "SERIAL_COUNT_SHORTAGE" | "SERIAL_COUNT_EXCESS"
+  >;
+  balance: SerialCountBalance;
+  physicalQty: number;
+  activeSerialQty: number;
+  classification: "MATCH" | "LEGACY_TRACEABILITY_GAP" | "CURRENT_OPERATIONAL_ERROR";
+}
+
+export function reconcileSerialCounts(
+  balances: SerialCountBalance[],
+  serials: PhysicalSerialIdentity[],
+): SerialCountReconciliationResult[] {
+  return balances.map((balance) => {
+    const activeSerialQty = serials.filter(
+      (serial) =>
+        isPhysicallyPresentSerialStatus(serial.status) &&
+        serial.productId === balance.productId &&
+        serial.warehouse === balance.warehouse &&
+        serial.location === balance.location &&
+        serial.condition === balance.condition,
+    ).length;
+    if (activeSerialQty === balance.physicalQty)
+      return {
+        status: "SERIAL_COUNT_MATCH",
+        balance,
+        physicalQty: balance.physicalQty,
+        activeSerialQty,
+        classification: "MATCH",
+      };
+    if (activeSerialQty < balance.physicalQty)
+      return {
+        status: "SERIAL_COUNT_SHORTAGE",
+        balance,
+        physicalQty: balance.physicalQty,
+        activeSerialQty,
+        classification: balance.legacySerialGap
+          ? "LEGACY_TRACEABILITY_GAP"
+          : "CURRENT_OPERATIONAL_ERROR",
+      };
+    return {
+      status: "SERIAL_COUNT_EXCESS",
+      balance,
+      physicalQty: balance.physicalQty,
+      activeSerialQty,
+      classification: "CURRENT_OPERATIONAL_ERROR",
+    };
   });
 }

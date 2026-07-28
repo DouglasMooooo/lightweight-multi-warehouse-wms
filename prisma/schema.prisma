@@ -241,6 +241,7 @@ model InventoryBalance {
   physicalQty    Decimal         @default(0) @db.Decimal(18, 3)
   frozenQty      Decimal         @default(0) @db.Decimal(18, 3)
   inTransitQty   Decimal         @default(0) @db.Decimal(18, 3)
+  legacySerialGap Boolean        @default(false)
   version        Int             @default(0)
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
@@ -264,6 +265,9 @@ model StockTransaction {
   serialNumberId     String?
   itemType           ItemType
   condition          StockCondition
+  sourceCondition    StockCondition?
+  targetCondition    StockCondition?
+  repairOutcome      RepairOutcome?
   quantity           Decimal              @db.Decimal(18, 3)
   physicalDelta      Decimal              @default(0) @db.Decimal(18, 3)
   frozenDelta        Decimal              @default(0) @db.Decimal(18, 3)

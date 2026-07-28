@@ -1,8 +1,12 @@
 import {
   reconcileInventory,
+  reconcileSerialCounts,
   reconcileSerials,
+  type PhysicalSerialIdentity,
   type ReconciliationResult,
   type ReconciliationRow,
+  type SerialCountBalance,
+  type SerialCountReconciliationResult,
   type SerialReconciliationResult,
   type SerialReconciliationRow,
 } from "@/domain/reconciliation";
@@ -24,5 +28,12 @@ export class SpreadsheetReconciliationService {
     wmsSerials: SerialReconciliationRow[],
   ): SerialReconciliationResult[] {
     return reconcileSerials(spreadsheetSerials, wmsSerials);
+  }
+
+  compareSerialCounts(
+    balances: SerialCountBalance[],
+    serials: PhysicalSerialIdentity[],
+  ): SerialCountReconciliationResult[] {
+    return reconcileSerialCounts(balances, serials);
   }
 }

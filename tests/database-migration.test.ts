@@ -19,6 +19,10 @@ describe("PostgreSQL integrity migrations", () => {
     path.join(process.cwd(), "prisma/migrations/20260728030000_domain_stabilisation/migration.sql"),
     "utf8",
   );
+  const integrityPatch = fs.readFileSync(
+    path.join(process.cwd(), "prisma/migrations/20260729000000_sprint_2_2_integrity/migration.sql"),
+    "utf8",
+  );
 
   it("normalizes nullable relational dimensions in the logical balance key", () => {
     expect(initial).toContain('CREATE UNIQUE INDEX "InventoryBalance_relational_grain_key"');
@@ -47,5 +51,13 @@ describe("PostgreSQL integrity migrations", () => {
     expect(stabilisation).toContain('ADD COLUMN "repairStartedAt"');
     expect(stabilisation).toContain('ADD COLUMN "pickedUpAt"');
     expect(stabilisation).toContain('CREATE TYPE "PickupStatus"');
+  });
+
+  it("adds explicit repair transition evidence and legacy serial-gap classification", () => {
+    expect(integrityPatch).toContain('ADD COLUMN "legacySerialGap"');
+    expect(integrityPatch).toContain('ADD COLUMN "sourceCondition"');
+    expect(integrityPatch).toContain('ADD COLUMN "targetCondition"');
+    expect(integrityPatch).toContain('ADD COLUMN "repairOutcome"');
+    expect(integrityPatch).toContain('WHERE "transactionType" = \'Repair_Completed\'');
   });
 });

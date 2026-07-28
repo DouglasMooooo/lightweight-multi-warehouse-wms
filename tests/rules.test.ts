@@ -9,6 +9,12 @@ import {
   validateOutboundSerial,
   validatePreparation,
 } from "@/domain/rules";
+import {
+  assertSerialRegistrationCapacity,
+  isAllocatableStockCondition,
+  isPhysicallyPresentSerialStatus,
+  registeredSerialStatusForCondition,
+} from "@/domain/serial-policy";
 
 describe("Prepared and shared balance rules", () => {
   it("keeps physical unchanged, increases frozen and decreases available", () => {
@@ -147,5 +153,46 @@ describe("pickup codes", () => {
     expect(new Set(codes).size).toBe(100);
     expect(codes[0]).toBe("SYD-00001");
     expect(formatPickupCode("MEL", 42)).toBe("MEL-00042");
+  });
+});
+
+describe("serial physical-presence policy", () => {
+  it("counts In_Stock, Prepared and Repair only", () => {
+    expect(
+      ["In_Stock", "Prepared", "Repair"].every((status) =>
+        isPhysicallyPresentSerialStatus(status as "In_Stock" | "Prepared" | "Repair"),
+      ),
+    ).toBe(true);
+    expect(
+      ["Outbound", "In_Transit", "Scrapped"].some((status) =>
+        isPhysicallyPresentSerialStatus(status as "Outbound" | "In_Transit" | "Scrapped"),
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects registration when all physical units already have serial identities", () => {
+    expect(() =>
+      assertSerialRegistrationCapacity({
+        serialTrackingRequired: true,
+        physicalQty: 2,
+        activePhysicalSerialCount: 2,
+      }),
+    ).toThrowError(
+      expect.objectContaining({ code: "NO_UNASSIGNED_PHYSICAL_UNIT_FOR_SN" }),
+    );
+  });
+
+  it("keeps Repair and Scrap non-allocatable", () => {
+    expect(isAllocatableStockCondition("New")).toBe(true);
+    expect(isAllocatableStockCondition("Repair_Good")).toBe(true);
+    expect(isAllocatableStockCondition("Repair")).toBe(false);
+    expect(isAllocatableStockCondition("Scrap")).toBe(false);
+  });
+
+  it("registers Repair identity as Repair and rejects Scrap registration", () => {
+    expect(registeredSerialStatusForCondition("Repair")).toBe("Repair");
+    expect(() => registeredSerialStatusForCondition("Scrap")).toThrowError(
+      expect.objectContaining({ code: "INVALID_SERIAL_REGISTRATION_CONDITION" }),
+    );
   });
 });

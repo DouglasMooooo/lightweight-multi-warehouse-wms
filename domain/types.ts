@@ -158,6 +158,9 @@ export interface StockTransaction {
   serialNumber?: string;
   qty: number;
   condition: StockCondition;
+  sourceCondition?: StockCondition;
+  targetCondition?: StockCondition;
+  repairOutcome?: "Repair_Good" | "Scrap" | "Returned_Unrepaired";
   fromLocation?: string;
   toLocation?: string;
   businessReference?: string;

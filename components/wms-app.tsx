@@ -1502,6 +1502,14 @@ function SerialSearchView({ state }: { state: WmsState }) {
               {transactions.map((row) => (
                 <div className="timeline-item" key={row.id}>
                   <strong>{row.type.replaceAll("_", " ")}</strong>
+                  {(row.sourceCondition || row.targetCondition || row.repairOutcome) && (
+                    <p>
+                      {row.sourceCondition ?? row.condition} → {row.targetCondition ?? row.condition}
+                      {row.repairOutcome
+                        ? ` · ${row.repairOutcome.replaceAll("_", " ")}`
+                        : ""}
+                    </p>
+                  )}
                   <p>
                     {formatDate(row.at)} · {row.fromLocation ?? "—"} → {row.toLocation ?? "—"}
                   </p>

@@ -118,6 +118,129 @@ describe("Serial traceability", () => {
     ).toThrow("Serial number already exists.");
   });
 
+  it("binds only available physical units and never changes Physical Qty", () => {
+    const state = fresh();
+    const balance = state.inventory.find((row) => row.id === "bal-1")!;
+    balance.physicalQty = 2;
+    balance.frozenQty = 0;
+    balance.availableQty = 2;
+    state.serials = state.serials.filter((row) => row.sku !== balance.sku);
+    const once = registerSerial(state, {
+      serialNumber: "NEW-SN-1",
+      sku: balance.sku!,
+      warehouseCode: balance.warehouseCode,
+      locationCode: balance.locationCode,
+    });
+    const twice = registerSerial(once, {
+      serialNumber: "NEW-SN-2",
+      sku: balance.sku!,
+      warehouseCode: balance.warehouseCode,
+      locationCode: balance.locationCode,
+    });
+    expect(twice.inventory.find((row) => row.id === balance.id)?.physicalQty).toBe(2);
+    expect(() =>
+      registerSerial(twice, {
+        serialNumber: "NEW-SN-3",
+        sku: balance.sku!,
+        warehouseCode: balance.warehouseCode,
+        locationCode: balance.locationCode,
+      }),
+    ).toThrowError(
+      expect.objectContaining({ code: "NO_UNASSIGNED_PHYSICAL_UNIT_FOR_SN" }),
+    );
+  });
+
+  it("rejects non-serial-tracked products and locations without matching stock", () => {
+    expect(() =>
+      registerSerial(fresh(), {
+        serialNumber: "MATERIAL-SN",
+        sku: "10-105-00346-00",
+        warehouseCode: "SYD",
+        locationCode: "R1-4-2-L",
+        condition: "Material",
+      }),
+    ).toThrow("serial-tracked products");
+    expect(() =>
+      registerSerial(fresh(), {
+        serialNumber: "WRONG-WAREHOUSE-SN",
+        sku: "97-223-00107-00",
+        warehouseCode: "MEL",
+        locationCode: "M1-1-1-L",
+      }),
+    ).toThrowError(
+      expect.objectContaining({ code: "NO_UNASSIGNED_PHYSICAL_UNIT_FOR_SN" }),
+    );
+  });
+
+  it.each(["Prepared", "Repair"] as const)(
+    "counts %s serials against physical registration capacity",
+    (status) => {
+      const state = fresh();
+      const balance =
+        status === "Prepared"
+          ? state.inventory.find((row) => row.id === "bal-1")!
+          : state.inventory.find((row) => row.id === "bal-5")!;
+      balance.physicalQty = 1;
+      balance.frozenQty = status === "Prepared" ? 1 : 0;
+      balance.availableQty = balance.physicalQty - balance.frozenQty;
+      state.serials = state.serials.filter((row) => row.sku !== balance.sku);
+      state.serials.push({
+        id: `existing-${status}`,
+        serialNumber: `EXISTING-${status}`,
+        sku: balance.sku!,
+        model: balance.model,
+        warehouseCode: balance.warehouseCode,
+        locationCode: balance.locationCode,
+        condition: balance.condition,
+        status,
+      });
+      expect(() =>
+        registerSerial(state, {
+          serialNumber: `SECOND-${status}`,
+          sku: balance.sku!,
+          warehouseCode: balance.warehouseCode,
+          locationCode: balance.locationCode,
+          condition: balance.condition,
+        }),
+      ).toThrowError(
+        expect.objectContaining({ code: "NO_UNASSIGNED_PHYSICAL_UNIT_FOR_SN" }),
+      );
+    },
+  );
+
+  it.each(["Outbound", "Scrapped"] as const)(
+    "does not count %s serials as physically present",
+    (status) => {
+      const state = fresh();
+      const balance = state.inventory.find((row) => row.id === "bal-1")!;
+      balance.physicalQty = 1;
+      balance.frozenQty = 0;
+      balance.availableQty = 1;
+      state.serials = state.serials.filter((row) => row.sku !== balance.sku);
+      state.serials.push({
+        id: `historical-${status}`,
+        serialNumber: `HISTORICAL-${status}`,
+        sku: balance.sku!,
+        model: balance.model,
+        warehouseCode: balance.warehouseCode,
+        locationCode: balance.locationCode,
+        condition: balance.condition,
+        status,
+      });
+      const registered = registerSerial(state, {
+        serialNumber: `CURRENT-${status}`,
+        sku: balance.sku!,
+        warehouseCode: balance.warehouseCode,
+        locationCode: balance.locationCode,
+      });
+      expect(
+        registered.serials.some(
+          (row) => row.serialNumber === `CURRENT-${status}`.toUpperCase(),
+        ),
+      ).toBe(true);
+    },
+  );
+
   it("faulty return changes SN to Repair", () => {
     const after = receiveFaulty(fresh(), {
       serialNumber: "60E5M4805C3F242",

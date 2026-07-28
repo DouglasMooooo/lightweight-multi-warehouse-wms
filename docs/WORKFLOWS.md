@@ -14,10 +14,11 @@
 
 1. Query ERP by known returned SN and receive once to Repair stock.
 2. Create a RepairReturn and RepairJob; preserve the existing serial entity when present.
-3. Start repair: `Received/Pending_Repair -> In_Repair`, recording `repairStartedAt`.
-4. Complete repair by choosing an outcome and, for Repair_Good, a target location.
+3. Start repair: `Pending_Repair -> In_Repair`, recording `repairStartedAt`.
+4. Only `In_Repair` can complete. Direct completion from Received/Pending_Repair is rejected.
 5. Repair_Good decrements Repair, increments Repair_Good, restores the same SN to `In_Stock`, and appends transaction/audit evidence.
-6. Legacy / Manual Recognition requires a reason and is only for historical Repair_Good whose earlier lifecycle is unavailable.
+6. Scrap decrements Repair and increments non-allocatable Scrap; Returned_Unrepaired stays non-allocatable in Repair at a service/holding location.
+7. Legacy / Manual Recognition requires a reason and is only for historical Repair_Good whose earlier lifecycle is unavailable.
 
 ## Pickup and label
 

@@ -23,3 +23,8 @@
 - `reportMachine` is an explicit Product-master flag and is independent of `itemType`; reportable Material SKUs are valid.
 - Workbook rows explicitly marked as physical-location occupancy displays are excluded from inventory and reconciliation quantities.
 - SN reconciliation reports missing, wrong-location, wrong-condition and status mismatches, classifying known historical gaps separately from current errors.
+- Native Repair must transition `Pending_Repair -> In_Repair` before completion; direct completion is rejected.
+- Returned_Unrepaired remains condition Repair with serial status Repair at a service/holding location. It is non-allocatable and has no `returnedToStockAt`.
+- Scrap remains non-allocatable, preserves one unit in Scrap inventory until a future controlled disposal flow, and has no `returnedToStockAt`.
+- `registerSerial` assigns an SN to unrepresented existing Physical Qty. It never changes a balance and rejects non-serial-tracked products or exhausted capacity.
+- Physically-present SN statuses are In_Stock, Prepared and Repair. Outbound, In_Transit and Scrapped do not count against Physical Qty.

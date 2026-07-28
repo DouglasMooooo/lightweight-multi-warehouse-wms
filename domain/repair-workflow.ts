@@ -1,4 +1,9 @@
 import { DomainError } from "./errors";
+import {
+  assertRepairCanComplete,
+  assertRepairCanStart,
+  repairCompletionDisposition,
+} from "./repair-rules";
 
 export interface RepairAssetState {
   jobId: string;
@@ -9,7 +14,14 @@ export interface RepairAssetState {
   locationId: string;
   condition: "Repair" | "Repair_Good" | "Scrap";
   serialStatus?: "Repair" | "In_Stock" | "Scrapped";
-  status: "Pending_Repair" | "In_Repair" | "Repair_Good" | "Scrapped";
+  status:
+    | "Received"
+    | "Pending_Repair"
+    | "In_Repair"
+    | "Repair_Completed"
+    | "Repair_Good"
+    | "Scrap_Pending"
+    | "Scrapped";
   receivedAt: string;
   repairStartedAt?: string;
   repairCompletedAt?: string;
@@ -19,8 +31,7 @@ export interface RepairAssetState {
 }
 
 export function startRepairAsset(asset: RepairAssetState, repairStartedAt: string) {
-  if (asset.status !== "Pending_Repair")
-    throw new DomainError("Repair job is not eligible to start.", "INVALID_REPAIR_STATE");
+  assertRepairCanStart(asset.status);
   return { ...asset, status: "In_Repair" as const, repairStartedAt };
 }
 
@@ -55,26 +66,17 @@ export function completeRepairAsset(
     outcome: "Repair_Good" | "Scrap" | "Returned_Unrepaired";
   },
 ) {
-  if (!["Pending_Repair", "In_Repair"].includes(asset.status))
-    throw new DomainError("Repair job is not eligible for completion.");
-  if (!input.targetLocationId) throw new DomainError("MISSING_PHYSICAL_LOCATION");
+  assertRepairCanComplete(asset.status);
+  if (!input.targetLocationId)
+    throw new DomainError("Physical location is required.", "MISSING_PHYSICAL_LOCATION");
+  const disposition = repairCompletionDisposition(input.outcome);
   const next = structuredClone(asset);
   next.locationId = input.targetLocationId;
   next.repairCompletedAt = input.completedAt;
-  next.returnedToStockAt = input.completedAt;
+  next.returnedToStockAt = disposition.returnsToUsableStock ? input.completedAt : undefined;
   next.outcome = input.outcome;
-  if (input.outcome === "Repair_Good") {
-    next.status = "Repair_Good";
-    next.condition = "Repair_Good";
-    next.serialStatus = next.serialId ? "In_Stock" : undefined;
-  } else if (input.outcome === "Scrap") {
-    next.status = "Scrapped";
-    next.condition = "Scrap";
-    next.serialStatus = next.serialId ? "Scrapped" : undefined;
-  } else {
-    next.status = "Repair_Good";
-    next.condition = "Repair";
-    next.serialStatus = next.serialId ? "In_Stock" : undefined;
-  }
+  next.status = disposition.jobStatus;
+  next.condition = disposition.targetCondition;
+  next.serialStatus = next.serialId ? disposition.serialStatus : undefined;
   return next;
 }

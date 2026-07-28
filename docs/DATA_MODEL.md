@@ -20,6 +20,12 @@ Database checks prevent negative physical/frozen/in-transit values and Frozen gr
 
 `RepairReturn.active` plus a partial unique index prevents duplicate active receipt for one SN. `RepairJob.repairStartedAt` records entry to active repair. `SerialNumber` remains first-class.
 
+`RepairJob.returnedToStockAt` is narrower than completion time: it is populated only when Repair_Good becomes usable `In_Stock`. Scrap and Returned_Unrepaired leave it null.
+
+`StockTransaction.sourceCondition`, `targetCondition` and `repairOutcome` make Repair_Completed reclassification explicit alongside its source/target locations, SN, business reference, actor, operation ID and effective time.
+
+`InventoryBalance.legacySerialGap` explicitly marks known pre-cutover aggregate balances whose incomplete SN coverage is informational. It does not relax registration capacity or current transaction rules.
+
 `PickupBatch.status` is `Draft`, `Ready`, `Picked_Up` or `Cancelled`. `readyAt` and `pickedUpAt` are distinct; carrier, customer, collector and remark are optional evidence. Pickup Code is unique.
 
 `PickupSequence` is incremented atomically and the issued value comes from the returned row. It never uses `MAX(code) + 1`.

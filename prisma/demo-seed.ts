@@ -138,6 +138,7 @@ export async function seedDemo(prisma: PrismaClient) {
         condition: "New",
         physicalQty: 32,
         frozenQty: 2,
+        legacySerialGap: true,
       },
     }),
     prisma.inventoryBalance.create({
@@ -148,6 +149,7 @@ export async function seedDemo(prisma: PrismaClient) {
         itemType: "Product",
         condition: "New",
         physicalQty: 8,
+        legacySerialGap: true,
       },
     }),
     prisma.inventoryBalance.create({
@@ -168,6 +170,7 @@ export async function seedDemo(prisma: PrismaClient) {
         itemType: "Product",
         condition: "Repair_Good",
         physicalQty: 4,
+        legacySerialGap: true,
       },
     }),
   ]);

@@ -3,6 +3,14 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { Prisma, PrismaClient } from "@/generated/prisma/client";
 import { DomainError } from "@/domain/errors";
+import { reconcileSerialCounts } from "@/domain/reconciliation";
+import {
+  assertRepairCanComplete,
+  assertRepairCanStart,
+  buildRepairCompletionLedgerEvidence,
+  repairCompletionDisposition,
+  repairInventoryTransition,
+} from "@/domain/repair-rules";
 import {
   assertFaultyReceiptAllowed,
   formatPickupCode,
@@ -11,7 +19,20 @@ import {
   validateOutboundSerial,
   validatePreparation,
 } from "@/domain/rules";
-import type { StockCondition, WarehouseCode, WmsCommand, WmsState } from "@/domain/types";
+import {
+  PHYSICALLY_PRESENT_SERIAL_STATUSES,
+  assertSerialRegistrationCapacity,
+  isAllocatableStockCondition,
+  isPhysicallyPresentSerialStatus,
+  registeredSerialStatusForCondition,
+} from "@/domain/serial-policy";
+import type {
+  SerialStatus,
+  StockCondition,
+  WarehouseCode,
+  WmsCommand,
+  WmsState,
+} from "@/domain/types";
 import type { ERPAdapter, ERPSerialLookup } from "@/integrations/erp-adapter";
 import { MockERPAdapter } from "@/integrations/mock-erp-adapter";
 import { getPrisma } from "@/lib/prisma";
@@ -217,7 +238,9 @@ export class WmsApplicationService {
     const pickupSequence = { SYD: 0, MEL: 0, BNE: 0 } as Record<WarehouseCode, number>;
     for (const row of sequences) pickupSequence[row.warehouse.code as WarehouseCode] = row.nextValue;
     const diagnosticExceptions: WmsState["exceptions"] = [];
-    const activeSerials = serials.filter((row) => ["In_Stock", "Prepared", "Repair"].includes(row.status));
+    const activeSerials = serials.filter((row) =>
+      isPhysicallyPresentSerialStatus(row.status as SerialStatus),
+    );
     for (const serial of activeSerials) {
       const matchingBalance = balances.find(
         (balance) =>
@@ -239,28 +262,40 @@ export class WmsApplicationService {
         });
       }
     }
-    for (const balance of balances.filter(
-      (row) => row.product?.serialTrackingRequired && row.physicalQty.greaterThan(0),
+    const serialCountResults = reconcileSerialCounts(
+      balances
+        .filter((row) => row.product?.serialTrackingRequired)
+        .map((row) => ({
+          balanceId: row.id,
+          productId: row.productId!,
+          sku: row.product!.sku,
+          warehouse: row.warehouseId,
+          location: row.locationId,
+          condition: row.condition,
+          physicalQty: number(row.physicalQty),
+          legacySerialGap: row.legacySerialGap,
+        })),
+      serials.map((row) => ({
+        productId: row.productId,
+        warehouse: row.currentWarehouseId ?? undefined,
+        location: row.currentLocationId ?? undefined,
+        condition: row.condition,
+        status: row.status as SerialStatus,
+      })),
+    );
+    for (const result of serialCountResults.filter(
+      (row) => row.status !== "SERIAL_COUNT_MATCH",
     )) {
-      const count = activeSerials.filter(
-        (serial) =>
-          serial.productId === balance.productId &&
-          serial.currentWarehouseId === balance.warehouseId &&
-          serial.currentLocationId === balance.locationId &&
-          serial.condition === balance.condition,
-      ).length;
-      if (count === 0) {
         diagnosticExceptions.push({
-          id: `diagnostic-balance-${balance.id}`,
-          type: "Inventory/SN reconciliation",
-          severity: "Low",
-          entityReference: balance.id,
-          message:
-            "Serial-tracked balance has no illustrative active SN rows. Preview seeds may be partial; production requires complete reconciliation.",
+          id: `diagnostic-serial-count-${result.balance.balanceId}`,
+          type: result.status,
+          severity:
+            result.classification === "LEGACY_TRACEABILITY_GAP" ? "Low" : "High",
+          entityReference: `${result.balance.sku}/${result.balance.location}/${result.balance.condition}`,
+          message: `${result.status}: Physical Qty ${result.physicalQty}; active physical SN Qty ${result.activeSerialQty}. Classification: ${result.classification}.`,
           status: "Open",
           createdAt: new Date().toISOString(),
         });
-      }
     }
 
     return {
@@ -392,6 +427,9 @@ export class WmsApplicationService {
         serialNumber: row.serialNumber?.serialNumber,
         qty: number(row.quantity),
         condition: row.condition,
+        sourceCondition: row.sourceCondition ?? undefined,
+        targetCondition: row.targetCondition ?? undefined,
+        repairOutcome: row.repairOutcome ?? undefined,
         fromLocation: row.sourceLocation?.code,
         toLocation: row.targetLocation?.code,
         businessReference: row.businessReference ?? undefined,
@@ -636,6 +674,11 @@ export class WmsApplicationService {
         include: { product: true, outboundOrder: { include: { warehouse: true } } },
       });
       if (!line || line.outboundOrderId !== input.orderId) throw new DomainError("Outbound order line not found.");
+      if (!isAllocatableStockCondition(line.requiredCondition))
+        throw new DomainError(
+          `${line.requiredCondition} inventory is not allocatable for outbound.`,
+          "NON_ALLOCATABLE_CONDITION",
+        );
       const location = await requireLocation(tx, line.outboundOrder.warehouseId, input.locationCode);
       const container = input.containerCode
         ? await tx.container.findFirst({
@@ -1078,21 +1121,54 @@ export class WmsApplicationService {
       const warehouse = await requireWarehouse(tx, input.warehouseCode);
       const location = await requireLocation(tx, warehouse.id, input.locationCode);
       const product = await requireProduct(tx, input.sku);
+      const normalized = input.serialNumber.trim().toUpperCase();
+      const duplicate = await tx.serialNumber.findUnique({
+        where: { serialNumber: normalized },
+        select: { id: true },
+      });
+      if (duplicate)
+        throw new DomainError("Serial number already exists.", "DUPLICATE_SERIAL_NUMBER");
+      const [physical, activePhysicalSerialCount] = await Promise.all([
+        tx.inventoryBalance.aggregate({
+          where: {
+            warehouseId: warehouse.id,
+            locationId: location.id,
+            productId: product.id,
+            condition: input.condition,
+          },
+          _sum: { physicalQty: true },
+        }),
+        tx.serialNumber.count({
+          where: {
+            productId: product.id,
+            currentWarehouseId: warehouse.id,
+            currentLocationId: location.id,
+            condition: input.condition,
+            status: { in: [...PHYSICALLY_PRESENT_SERIAL_STATUSES] },
+          },
+        }),
+      ]);
+      assertSerialRegistrationCapacity({
+        serialTrackingRequired: product.serialTrackingRequired,
+        physicalQty: number(physical._sum.physicalQty ?? 0),
+        activePhysicalSerialCount,
+      });
+      const registeredStatus = registeredSerialStatusForCondition(input.condition);
       await tx.serialNumber.create({
         data: {
-          serialNumber: input.serialNumber.trim().toUpperCase(),
+          serialNumber: normalized,
           productId: product.id,
           currentWarehouseId: warehouse.id,
           currentLocationId: location.id,
           condition: input.condition,
-          status: "In_Stock",
+          status: registeredStatus,
         },
       });
       await audit(tx, who, {
         operation: "Registered serial",
         entityType: "SerialNumber",
-        entityId: input.serialNumber,
-        remark: `${input.serialNumber} registered at ${input.warehouseCode}/${input.locationCode}.`,
+        entityId: normalized,
+        remark: `${normalized} bound to an existing physical unit at ${input.warehouseCode}/${input.locationCode}; inventory quantity unchanged.`,
       });
     });
   }
@@ -1201,14 +1277,15 @@ export class WmsApplicationService {
         where: { id: input.repairJobId },
         include: { product: true, serialNumber: true, warehouse: true, repairReturn: true },
       });
-      if (!job || !["Received", "Pending_Repair", "In_Repair"].includes(job.status))
-        throw new DomainError("Repair job is not eligible for completion.");
+      if (!job) throw new DomainError("Repair job not found.", "REPAIR_JOB_NOT_FOUND");
+      assertRepairCanComplete(job.status);
       const target = await requireLocation(tx, job.warehouseId, input.targetLocationCode);
-      const targetCondition =
-        input.outcome === "Repair_Good" ? "Repair_Good" : input.outcome === "Scrap" ? "Scrap" : "Repair";
-      const targetStatus =
-        input.outcome === "Repair_Good" ? "Repair_Good" : input.outcome === "Scrap" ? "Scrapped" : "Repair_Completed";
-      const serialStatus = input.outcome === "Scrap" ? "Scrapped" : "In_Stock";
+      const disposition = repairCompletionDisposition(input.outcome);
+      if (input.outcome === "Returned_Unrepaired" && !target.serviceZone)
+        throw new DomainError(
+          "Returned unrepaired assets must remain in a repair or holding location.",
+          "INVALID_REPAIR_LOCATION",
+        );
       const inventory = new InventoryRepository(tx);
       const sourceKey = balanceKey({
         warehouseId: job.warehouseId,
@@ -1224,10 +1301,21 @@ export class WmsApplicationService {
         locationId: target.id,
         productId: job.productId,
         itemType: job.product.itemType,
-        condition: targetCondition,
+        condition: disposition.targetCondition,
       });
-      await inventory.applyDelta(sourceKey, { physicalDelta: -1 });
-      await inventory.applyDelta(targetKey, { physicalDelta: 1 });
+      const inventoryTransition = repairInventoryTransition({
+        sourceLocationId: job.currentLocationId,
+        targetLocationId: target.id,
+        outcome: input.outcome,
+      });
+      if (inventoryTransition.changesBalance) {
+        await inventory.applyDelta(sourceKey, {
+          physicalDelta: inventoryTransition.sourcePhysicalDelta,
+        });
+        await inventory.applyDelta(targetKey, {
+          physicalDelta: inventoryTransition.targetPhysicalDelta,
+        });
+      }
       const at = new Date();
       if (job.serialNumberId) {
         await tx.serialNumber.update({
@@ -1235,8 +1323,8 @@ export class WmsApplicationService {
           data: {
             currentWarehouseId: job.warehouseId,
             currentLocationId: target.id,
-            condition: targetCondition,
-            status: serialStatus,
+            condition: disposition.targetCondition,
+            status: disposition.serialStatus,
           },
         });
       }
@@ -1244,10 +1332,10 @@ export class WmsApplicationService {
         where: { id: job.id },
         data: {
           currentLocationId: target.id,
-          status: targetStatus,
+          status: disposition.jobStatus,
           outcome: input.outcome,
           repairCompletedAt: at,
-          returnedToStockAt: at,
+          returnedToStockAt: disposition.returnsToUsableStock ? at : null,
           remark: input.remark,
         },
       });
@@ -1257,33 +1345,43 @@ export class WmsApplicationService {
           data: { active: false, completedAt: at },
         });
       await tx.stockTransaction.create({
-        data: {
-          transactionType: "Repair_Completed",
+        data: buildRepairCompletionLedgerEvidence({
           warehouseId: job.warehouseId,
           sourceLocationId: job.currentLocationId,
           targetLocationId: target.id,
           productId: job.productId,
           serialNumberId: job.serialNumberId,
           itemType: job.product.itemType,
-          condition: targetCondition,
-          quantity: 1,
-          physicalDelta: 0,
+          outcome: input.outcome,
           businessReference: job.originalShNo,
           operationId: operationId(),
           effectiveAt: at,
-          reason: input.outcome,
           remark: input.remark,
           createdById: who.id,
-        },
+        }),
       });
       await audit(tx, who, {
         operation: "Completed repair",
         entityType: "RepairJob",
         entityId: job.id,
         businessReference: job.originalShNo ?? undefined,
+        before: {
+          status: job.status,
+          locationId: job.currentLocationId,
+          condition: "Repair",
+          serialStatus: job.serialNumber?.status,
+        },
+        after: {
+          status: disposition.jobStatus,
+          outcome: input.outcome,
+          locationId: target.id,
+          condition: disposition.targetCondition,
+          serialStatus: disposition.serialStatus,
+          returnedToStockAt: disposition.returnsToUsableStock ? at.toISOString() : null,
+        },
         remark: job.serialNumber
-          ? `${job.serialNumber.serialNumber} preserved and reclassified to ${targetCondition} at ${target.code}.`
-          : `Legacy quantity reclassified to ${targetCondition} at ${target.code}; traceability warning retained.`,
+          ? `${job.serialNumber.serialNumber}: Repair/${job.currentLocationId} -> ${disposition.targetCondition}/${target.code}; outcome ${input.outcome}.`
+          : `Repair quantity reclassified to ${disposition.targetCondition} at ${target.code}; outcome ${input.outcome}; traceability warning retained.`,
       });
     });
   }
@@ -1292,11 +1390,8 @@ export class WmsApplicationService {
     await serializable(this.prisma, async (tx) => {
       const who = await actor(tx);
       const job = await tx.repairJob.findUnique({ where: { id: repairJobId } });
-      if (!job || !["Received", "Pending_Repair"].includes(job.status))
-        throw new DomainError(
-          "Repair job is not eligible to start.",
-          "INVALID_REPAIR_STATE",
-        );
+      if (!job) throw new DomainError("Repair job not found.", "REPAIR_JOB_NOT_FOUND");
+      assertRepairCanStart(job.status);
       const repairStartedAt = new Date();
       await tx.repairJob.update({
         where: { id: job.id },
