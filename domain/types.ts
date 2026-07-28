@@ -88,6 +88,15 @@ export interface OutboundLine {
   preparedQty: number;
   dispatchedQty: number;
   allocationLocation?: string;
+  allocations: Array<{
+    id: string;
+    locationCode: string;
+    containerCode?: string;
+    quantity: number;
+    serialNumber?: string;
+    preparedAt?: string;
+    dispatchedAt?: string;
+  }>;
   scannedSerials: string[];
 }
 
@@ -169,3 +178,15 @@ export interface WmsState {
   pickupSequence: Record<WarehouseCode, number>;
   faultyReceivedCount: number;
 }
+
+export type WmsCommand =
+  | { type: "prepareOutbound"; orderId: string; lineId: string; locationCode: string; qty: number; containerCode?: string }
+  | { type: "scanOutboundSerial"; orderId: string; lineId: string; serialNumber: string }
+  | { type: "dispatchOutbound"; orderId: string }
+  | { type: "registerSerial"; serialNumber: string; sku: string; warehouseCode: WarehouseCode; locationCode: string; condition: StockCondition }
+  | { type: "adjustStock"; direction: "In" | "Out"; warehouseCode: WarehouseCode; locationCode: string; sku?: string; itemType: ItemType; condition: StockCondition; qty: number; reason: string; remark: string; serialNumber?: string }
+  | { type: "receiveFaulty"; serialNumber: string }
+  | { type: "moveStock"; warehouseCode: WarehouseCode; sku: string; condition: StockCondition; fromLocation: string; toLocation: string; qty: number; remark: string; serialNumbers?: string[] }
+  | { type: "dispatchTransfer"; transferId: string }
+  | { type: "receiveTransfer"; transferId: string; destinationLocation: string }
+  | { type: "resetDemo" };

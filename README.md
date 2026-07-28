@@ -1,36 +1,22 @@
 # Lightweight Multi-Warehouse WMS Preview
 
-A task-oriented warehouse execution Preview for Sydney operations, shaped for future PostgreSQL-backed multi-warehouse deployment and ERP integration.
+Sprint 1 is a PostgreSQL-backed Next.js WMS Preview for SYD, MEL and BNE. PostgreSQL is the authoritative store; browser state is used only for filters and forms. Inventory-changing commands run through Route Handlers, application services, domain validation, Prisma transactions and the ERP adapter.
 
-The Preview includes working browser-based demo workflows for current stock, Prepared/Frozen outbound, pickup labels, SN scanning and dispatch, faulty returns, atomic Move, controlled Adjustment, SN traceability, SYD → MEL transfer, stocktake counts, audit and exceptions. Demo changes persist in the browser and can be reset from the header.
+## Requirements
 
-## Quick start — no database required
+- Node.js 24+
+- pnpm 11+
+- PostgreSQL 15+
 
-Requirements: Node.js 20.9+ and pnpm.
-
-```powershell
-pnpm install
-pnpm dev
-```
-
-Open `http://localhost:3000/dashboard`.
-
-There is no password in Preview demo mode. The active identity is `Demo Supervisor` with role `Warehouse_Supervisor`.
-
-Useful demo values:
-
-- Faulty ERP lookup SN: `60E5M4805C3F242`
-- Prepared outbound: `SH-2607-00175008`
-- Outbound scan SNs: `EQ48S260700001`, `EQ48S260700002`
-- Basic transfer: `TR-SYD-MEL-00018`
-
-## PostgreSQL setup
-
-Create an empty PostgreSQL database locally, in Neon, or in Supabase. Then:
+## Local setup
 
 ```powershell
 Copy-Item .env.example .env
-# Edit DATABASE_URL in .env
+```
+
+Create a PostgreSQL database named `wms`, then set `DATABASE_URL` in `.env`.
+
+```powershell
 pnpm install
 pnpm db:generate
 pnpm db:migrate
@@ -38,28 +24,29 @@ pnpm db:seed
 pnpm dev
 ```
 
-The browser Preview currently uses the in-memory demo repository even when a database is configured. The Prisma schema, migration, seed, repository boundary and transactional domain services are ready for the next sprint’s server-action wiring.
+Open `http://localhost:3000/dashboard`.
+
+For a deployment, run migrations non-interactively:
+
+```powershell
+pnpm prisma migrate deploy
+```
+
+## Demo reset
+
+Reset is available only when both `DEMO_MODE=true` and `NEXT_PUBLIC_DEMO_MODE=true`, and it is rejected when `NODE_ENV=production`. It clears and recreates the demo database through the server seed; it never uses localStorage.
 
 ## Validation
 
 ```powershell
 pnpm db:validate
+pnpm db:generate
 pnpm test
 pnpm typecheck
 pnpm lint
 pnpm build
 ```
 
-## Deployment
+`ERP_ADAPTER=mock` keeps ERP calls server-side with deterministic Preview fixtures. The operational workbook at `reference/SYD_WMS_current_reference.xlsx` is read-only business evidence and is never imported by the runtime.
 
-The application is compatible with Vercel’s Next.js runtime. Configure `DATABASE_URL`, `ERP_ADAPTER`, and `NEXT_PUBLIC_DEMO_MODE` in the Vercel project. Use a pooled PostgreSQL connection string suitable for serverless execution and a direct connection for migrations if the provider recommends one. Do not commit `.env`.
-
-## Architecture
-
-The repository separates:
-
-`UI → application services → domain operations → repository → integration adapters`
-
-See the documents in `docs/` for rules, workflows, schema decisions, ERP behaviour, assumptions and backlog.
-
-The validated spreadsheet is preserved read-only at `reference/SYD_WMS_current_reference.xlsx`. Development code must never write to it.
+See [Architecture](docs/ARCHITECTURE.md), [Data Model](docs/DATA_MODEL.md), [Business Rules](docs/BUSINESS_RULES.md), [Workflows](docs/WORKFLOWS.md), and [Assumptions](docs/ASSUMPTIONS.md).

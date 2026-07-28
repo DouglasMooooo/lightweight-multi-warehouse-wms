@@ -129,6 +129,27 @@ describe("Serial traceability", () => {
     expect(serial?.status).toBe("Repair");
     expect(serial?.locationCode).toBe("REPAIR-01");
   });
+
+  it("receiving the same faulty SN twice cannot increment repair stock twice", () => {
+    const record = {
+      serialNumber: "60E5M4805C3F242",
+      relatedShNo: "SH-2607-00165610",
+      sku: "97-223-00107-00",
+      model: "EQ4800-S",
+    };
+    const once = receiveFaulty(fresh(), record);
+    const repairQty = once.inventory.find(
+      (row) => row.sku === record.sku && row.locationCode === "REPAIR-01" && row.condition === "Repair",
+    )?.physicalQty;
+    expect(() => receiveFaulty(once, record)).toThrow(
+      "This serial number has already been received into repair inventory.",
+    );
+    expect(
+      once.inventory.find(
+        (row) => row.sku === record.sku && row.locationCode === "REPAIR-01" && row.condition === "Repair",
+      )?.physicalQty,
+    ).toBe(repairQty);
+  });
 });
 
 describe("Transfer", () => {

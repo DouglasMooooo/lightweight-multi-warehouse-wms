@@ -1,35 +1,11 @@
-# Assumptions and reference conflicts
+# Assumptions and Workbook Conflicts
 
-The workbook was inspected as operational evidence and remains unmodified.
+The validated Sydney workbook was inspected as read-only business evidence.
 
-## Confirmed workbook evidence carried forward
-
-- Prepared has no physical stock effect.
-- Move balances source and destination.
-- Return_to_Repair normally enters `REPAIR-01`.
-- Physical location is separate from ERP warehouse selection.
-- Current stock is derived, never manually entered.
-- Mixed containers retain one row per member SKU.
-- Controlled no-SKU `Unmonitored material` Adjustment_In exists.
-- New, Repair_Good, Repair and Material are operationally distinct.
-
-## Specification takes precedence
-
-1. The workbook calculates current stock with formulas and concatenated helper keys. The application uses `InventoryBalance`, relational columns and database constraints.
-2. The workbook records Prepared without changing Current_Qty but only exposes a calculated Frozen_Qty. The application makes frozen quantity a first-class balance.
-3. The workbook’s SN rule requires SN mainly for confirmed Product Outbound and Return_to_Repair. The specification’s per-product `serialTrackingRequired` rule also governs inbound and transfers.
-4. The workbook says SH_No is the main official reference and discourages extra operator-facing case IDs. The database still uses internal relational IDs; SH No remains the visible business reference.
-5. The workbook stores pickup codes on ledger rows. The application stores pickup code on `OutboundOrder` and uses `PickupSequence` for concurrency safety.
-6. The workbook is Sydney-only and has no warehouse dimension. The application adds Warehouse to every relevant relation for MEL/BNE expansion.
-7. The workbook formula implements Move using helper source quantity/key columns. The application uses one atomic native Move operation.
-8. The workbook classifies a fixed set of nine models as Product. The application treats Product/Material as governed master data and does not hard-code model lists in UI.
-9. The workbook allows opening and ordinary quantity stock without SN. This remains valid where the Product master does not require unit traceability for that operation.
-10. Weekly/monthly repair reporting and the 2026-07-20 cutover are historical spreadsheet workflows and are not implemented in Preview v0.1.
-
-## Validation needed
-
-- Confirm whether standard inbound must always capture every SN for all current Product SKUs.
-- Confirm the production ERP warehouse labels and whether mappings vary by physical warehouse.
-- Confirm whether Repair completion should be its own transaction type or a controlled paired adjustment in the first production release.
-- Confirm pickup sequence reset policy, if any, per warehouse/year.
-- Confirm stocktake approval thresholds and transfer overdue duration.
+- Workbook `Prepared` rows leave Current_Qty unchanged. Sprint 1 preserves that rule and adds database Frozen reservations required by the specification.
+- The workbook calculates current stock through formula/helper columns and concatenated logical keys. Sprint 1 replaces these with relational balances, constraints and transactions; helper columns are not domain fields.
+- The workbook records Move as source/destination effects. Sprint 1 models one atomic Move transaction and requires selected SNs for serial-tracked Product moves to avoid ledger drift.
+- Workbook guidance says SN is mandatory mainly for confirmed Product Outbound and Return_to_Repair, while aggregate opening examples can be partial. Sprint 1 follows the stricter specification for unit-level outbound/transfer/move integrity and keeps partial seed reconciliation diagnostic-only.
+- Workbook guidance treats ERP SH_No as the official business reference and discourages extra operator-facing IDs. Database IDs are internal relational identifiers; SH No and transfer number remain business references.
+- For Preview simplicity, in-transit quantity remains on the source balance while Physical is removed. This does not mean the unit is physically at the source. A transfer-level in-transit ledger is recommended later.
+- The workbook's Current Stock may expose SN-level formula grain. Sprint 1 separates aggregate balances from the first-class SN ledger and reconciles them diagnostically.

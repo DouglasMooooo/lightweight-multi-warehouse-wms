@@ -320,7 +320,9 @@ export function receiveFaulty(
 ) {
   const state = copy(source);
   const existing = state.serials.find((row) => row.serialNumber === erpRecord.serialNumber);
-  if (existing && !["Outbound", "Repair"].includes(existing.status))
+  if (existing?.status === "Repair")
+    throw new DomainError("This serial number has already been received into repair inventory.");
+  if (existing && existing.status !== "Outbound")
     throw new DomainError("Serial number already exists in active inventory.");
   const locationCode = "REPAIR-01";
   requireLocation(state, "SYD", locationCode);
