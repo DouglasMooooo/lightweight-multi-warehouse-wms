@@ -85,6 +85,13 @@ enum LabelType {
   Unit_SN_Label
 }
 
+enum PickupStatus {
+  Draft
+  Ready
+  Picked_Up
+  Cancelled
+}
+
 enum ReportingPeriodType {
   Weekly
   Monthly
@@ -317,6 +324,8 @@ model OutboundOrder {
   status          OutboundStatus
   erpSyncStatus   ERPStatus           @default(Pending)
   customerLabel   String?
+  importedAt      DateTime?
+  allocatedAt     DateTime?
   preparedAt      DateTime?
   readyForPickupAt DateTime?
   outboundAt      DateTime?
@@ -407,6 +416,7 @@ model RepairJob {
   source               RepairSource   @default(Native_Return)
   receivedAt           DateTime       @default(now())
   repairCompletedAt    DateTime?
+  repairStartedAt      DateTime?
   returnedToStockAt    DateTime?
   remark               String
   createdAt            DateTime       @default(now())
@@ -428,8 +438,14 @@ model PickupBatch {
   code        String          @unique
   warehouseId String
   labelType   LabelType       @default(Batch_Label)
+  status      PickupStatus    @default(Draft)
   createdAt   DateTime        @default(now())
   readyAt     DateTime?
+  pickedUpAt  DateTime?
+  carrier     String?
+  customer    String?
+  collector   String?
+  remark      String?
   warehouse   Warehouse       @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
   orders      OutboundOrder[]
 

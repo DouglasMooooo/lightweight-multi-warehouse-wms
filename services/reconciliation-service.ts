@@ -1,7 +1,10 @@
 import {
   reconcileInventory,
+  reconcileSerials,
   type ReconciliationResult,
   type ReconciliationRow,
+  type SerialReconciliationResult,
+  type SerialReconciliationRow,
 } from "@/domain/reconciliation";
 
 /**
@@ -14,5 +17,12 @@ export class SpreadsheetReconciliationService {
     wmsCurrentStock: ReconciliationRow[],
   ): ReconciliationResult[] {
     return reconcileInventory(spreadsheetCurrentStock, wmsCurrentStock);
+  }
+
+  compareSerials(
+    spreadsheetSerials: SerialReconciliationRow[],
+    wmsSerials: SerialReconciliationRow[],
+  ): SerialReconciliationResult[] {
+    return reconcileSerials(spreadsheetSerials, wmsSerials);
   }
 }

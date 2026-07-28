@@ -4,9 +4,14 @@ export type ReconciliationStatus =
   | "MISSING_IN_LEDGER"
   | "QTY_DIFFERENCE"
   | "CONDITION_DIFFERENCE"
-  | "LOCATION_DIFFERENCE";
+  | "LOCATION_DIFFERENCE"
+  | "SN_MISSING_IN_WMS"
+  | "SN_WRONG_LOCATION"
+  | "SN_WRONG_CONDITION"
+  | "SN_STATUS_MISMATCH";
 
 export interface ReconciliationRow {
+  warehouse?: string;
   sku: string;
   condition: string;
   location: string;
@@ -21,7 +26,7 @@ export interface ReconciliationResult {
 }
 
 const grain = (row: ReconciliationRow) =>
-  JSON.stringify([row.sku, row.condition, row.location, row.container ?? ""]);
+  JSON.stringify([row.warehouse ?? "", row.sku, row.condition, row.location, row.container ?? ""]);
 
 export function reconcileInventory(
   ledgerRows: ReconciliationRow[],
@@ -47,6 +52,7 @@ export function reconcileInventory(
       (target, i) =>
         !used.has(i) &&
         target.sku === source.sku &&
+        (target.warehouse ?? "") === (source.warehouse ?? "") &&
         target.location === source.location &&
         (target.container ?? "") === (source.container ?? "") &&
         target.quantity === source.quantity,
@@ -60,6 +66,7 @@ export function reconcileInventory(
       (target, i) =>
         !used.has(i) &&
         target.sku === source.sku &&
+        (target.warehouse ?? "") === (source.warehouse ?? "") &&
         target.condition === source.condition &&
         (target.container ?? "") === (source.container ?? "") &&
         target.quantity === source.quantity,
@@ -75,4 +82,47 @@ export function reconcileInventory(
     if (!used.has(index)) results.push({ status: "MISSING_IN_LEDGER", wms: row });
   }
   return results;
+}
+
+export interface SerialReconciliationRow {
+  serialNumber: string;
+  sku: string;
+  warehouse: string;
+  location: string;
+  condition: string;
+  status: string;
+  legacyIncomplete?: boolean;
+}
+
+export interface SerialReconciliationResult {
+  status: Extract<
+    ReconciliationStatus,
+    "MATCH" | "SN_MISSING_IN_WMS" | "SN_WRONG_LOCATION" | "SN_WRONG_CONDITION" | "SN_STATUS_MISMATCH"
+  >;
+  ledger: SerialReconciliationRow;
+  wms?: SerialReconciliationRow;
+  classification: "LEGACY_TRACEABILITY_GAP" | "CURRENT_OPERATIONAL_ERROR" | "MATCH";
+}
+
+export function reconcileSerials(
+  ledgerRows: SerialReconciliationRow[],
+  wmsRows: SerialReconciliationRow[],
+): SerialReconciliationResult[] {
+  const wmsBySerial = new Map(
+    wmsRows.map((row) => [row.serialNumber.trim().toUpperCase(), row]),
+  );
+  return ledgerRows.map((ledger) => {
+    const wms = wmsBySerial.get(ledger.serialNumber.trim().toUpperCase());
+    const classification = ledger.legacyIncomplete
+      ? "LEGACY_TRACEABILITY_GAP"
+      : "CURRENT_OPERATIONAL_ERROR";
+    if (!wms) return { status: "SN_MISSING_IN_WMS", ledger, classification };
+    if (wms.location !== ledger.location || wms.warehouse !== ledger.warehouse)
+      return { status: "SN_WRONG_LOCATION", ledger, wms, classification };
+    if (wms.condition !== ledger.condition)
+      return { status: "SN_WRONG_CONDITION", ledger, wms, classification };
+    if (wms.status !== ledger.status)
+      return { status: "SN_STATUS_MISMATCH", ledger, wms, classification };
+    return { status: "MATCH", ledger, wms, classification: "MATCH" };
+  });
 }

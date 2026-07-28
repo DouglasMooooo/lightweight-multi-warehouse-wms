@@ -16,6 +16,7 @@ const outboundFixtures: Record<string, ERPOutboundOrder> = {
   "SH-2607-00175722": {
     shNo: "SH-2607-00175722",
     physicalWarehouseCode: "SYD",
+    pickupCode: "SYD-00271",
     customerLabel: "Sydney service replacement",
     replacementUnitInformation: [
       {

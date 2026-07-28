@@ -6,14 +6,23 @@ import {
   prepareAllocations,
 } from "@/domain/outbound-workflow";
 import { aggregatePickupLabel } from "@/domain/label-policy";
-import { mondayToSunday, operationalOrderMetrics } from "@/domain/reporting";
-import { completeRepairAsset } from "@/domain/repair-workflow";
-import { reconcileInventory } from "@/domain/reconciliation";
+import {
+  mondayToSunday,
+  operationalMovementMetrics,
+  operationalOrderMetrics,
+} from "@/domain/reporting";
+import {
+  completeRepairAsset,
+  recogniseLegacyRepairGood,
+  startRepairAsset,
+} from "@/domain/repair-workflow";
+import { reconcileInventory, reconcileSerials } from "@/domain/reconciliation";
 
 describe("Sprint 2 outbound workflow", () => {
   it("imports as Pending Allocation without allocations, frozen stock or outboundAt", () => {
     const order = importedOutbound("SH-A", [2], "2026-07-28T00:00:00Z");
     expect(order.status).toBe("Pending_Allocation");
+    expect(order.importedAt).toBe("2026-07-28T00:00:00Z");
     expect(order.lines[0]).toMatchObject({ allocatedQty: 0, preparedQty: 0, allocations: [] });
     expect(order.outboundAt).toBeUndefined();
   });
@@ -23,6 +32,7 @@ describe("Sprint 2 outbound workflow", () => {
     const once = allocateLine(imported, 0, { id: "a", locationCode: "FLEX-01", quantity: 2 });
     const allocated = allocateLine(once, 0, { id: "b", locationCode: "R2-1-4-R", quantity: 3 });
     expect(allocated.status).toBe("Allocated");
+    expect(allocated.allocatedAt).toBeDefined();
     expect(allocated.lines[0].allocatedQty).toBe(5);
     expect(allocated.lines[0].preparedQty).toBe(0);
     expect(allocated.lines[0].allocations.map((row) => row.locationCode)).toEqual([
@@ -51,6 +61,27 @@ describe("Sprint 2 outbound workflow", () => {
 });
 
 describe("repair lifecycle", () => {
+  it("records the operational start time", () => {
+    const started = startRepairAsset(
+      {
+        jobId: "repair-1",
+        serialId: "serial-1",
+        serialNumber: "SN-001",
+        productId: "product-1",
+        warehouseId: "syd",
+        locationId: "repair-location",
+        condition: "Repair",
+        serialStatus: "Repair",
+        status: "Pending_Repair",
+        receivedAt: "2026-07-28T00:00:00Z",
+        source: "Native_Return",
+      },
+      "2026-07-28T01:00:00Z",
+    );
+    expect(started.status).toBe("In_Repair");
+    expect(started.repairStartedAt).toBe("2026-07-28T01:00:00Z");
+  });
+
   it("preserves the same serial and converts Repair to allocatable Repair_Good", () => {
     const completed = completeRepairAsset(
       {
@@ -78,6 +109,30 @@ describe("repair lifecycle", () => {
     expect(completed.serialStatus).toBe("In_Stock");
     expect(completed.locationId).toBe("flex-location");
   });
+
+  it("requires a reason and audit for legacy Repair_Good recognition", () => {
+    expect(() =>
+      recogniseLegacyRepairGood({
+        productId: "product-1",
+        targetLocationId: "flex-location",
+        quantity: 1,
+        reason: "",
+      }),
+    ).toThrow("Reason is required");
+    const recognised = recogniseLegacyRepairGood({
+      productId: "product-1",
+      targetLocationId: "flex-location",
+      quantity: 2,
+      reason: "Opening traceability gap",
+    });
+    expect(recognised).toMatchObject({
+      source: "Legacy_Manual",
+      auditRequired: true,
+      traceabilityWarning: true,
+      condition: "Repair_Good",
+    });
+    expect(recognised).not.toHaveProperty("jobId");
+  });
 });
 
 describe("pickup label policy", () => {
@@ -100,6 +155,7 @@ describe("pickup label policy", () => {
       },
     ]);
     expect(label.shNos).toEqual(["SH-A", "SH-B"]);
+    expect(label).toMatchObject({ labelType: "BATCH_LABEL", pageCount: 1 });
     expect(label.lines).toHaveLength(2);
     expect(label.lines.find((row) => row.erpWarehouse === "Sydney Material Warehouse")?.qty).toBe(3);
     expect(label.lines.find((row) => row.erpWarehouse === "Sydney Good Product Warehouse")?.qty).toBe(1);
@@ -147,6 +203,26 @@ describe("semantic reporting", () => {
     );
     expect(after.outstandingReturns).toEqual([]);
   });
+
+  it("uses effectiveAt for condition-specific movement metrics", () => {
+    const metrics = operationalMovementMetrics(
+      [
+        { transactionType: "Inbound", condition: "New", quantity: 3, effectiveAt: "2026-07-28T01:00:00Z" },
+        { transactionType: "Outbound", condition: "New", quantity: 2, effectiveAt: "2026-07-28T02:00:00Z" },
+        { transactionType: "Repair_Completed", condition: "Repair_Good", quantity: 1, effectiveAt: "2026-07-28T03:00:00Z" },
+        { transactionType: "Outbound", condition: "Repair_Good", quantity: 1, effectiveAt: "2026-07-28T04:00:00Z" },
+      ],
+      new Date("2026-07-28T00:00:00Z"),
+      new Date("2026-07-28T23:59:59Z"),
+    );
+    expect(metrics).toMatchObject({
+      newInbound: 3,
+      newOutbound: 2,
+      repairGoodInbound: 1,
+      repairGoodOutbound: 1,
+      repairCompleted: 1,
+    });
+  });
 });
 
 describe("spreadsheet reconciliation", () => {
@@ -165,5 +241,55 @@ describe("spreadsheet reconciliation", () => {
     expect(statuses).toEqual(["QTY_DIFFERENCE", "CONDITION_DIFFERENCE", "LOCATION_DIFFERENCE"]);
     expect(ledger[0].quantity).toBe(2);
     expect(wms[0].quantity).toBe(3);
+  });
+
+  it("detects missing rows in both directions", () => {
+    const results = reconcileInventory(
+      [{ warehouse: "SYD", sku: "A", condition: "New", location: "L1", quantity: 1 }],
+      [{ warehouse: "SYD", sku: "B", condition: "New", location: "L1", quantity: 1 }],
+    );
+    expect(results.map((row) => row.status)).toEqual(["MISSING_IN_WMS", "MISSING_IN_LEDGER"]);
+  });
+
+  it("classifies serial gaps separately from current operational mismatches", () => {
+    const results = reconcileSerials(
+      [
+        {
+          serialNumber: "SN-LEGACY",
+          sku: "A",
+          warehouse: "SYD",
+          location: "L1",
+          condition: "Repair",
+          status: "Repair",
+          legacyIncomplete: true,
+        },
+        {
+          serialNumber: "SN-CURRENT",
+          sku: "A",
+          warehouse: "SYD",
+          location: "L1",
+          condition: "Repair_Good",
+          status: "In_Stock",
+        },
+      ],
+      [
+        {
+          serialNumber: "SN-CURRENT",
+          sku: "A",
+          warehouse: "SYD",
+          location: "L2",
+          condition: "Repair_Good",
+          status: "In_Stock",
+        },
+      ],
+    );
+    expect(results[0]).toMatchObject({
+      status: "SN_MISSING_IN_WMS",
+      classification: "LEGACY_TRACEABILITY_GAP",
+    });
+    expect(results[1]).toMatchObject({
+      status: "SN_WRONG_LOCATION",
+      classification: "CURRENT_OPERATIONAL_ERROR",
+    });
   });
 });

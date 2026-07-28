@@ -7,6 +7,8 @@ export interface PickupOrderInput {
 }
 
 export interface BatchLabel {
+  labelType: "BATCH_LABEL";
+  pageCount: 1;
   pickupCode: string;
   shNos: string[];
   lines: PickupLabelLine[];
@@ -27,6 +29,8 @@ export function aggregatePickupLabel(orders: PickupOrderInput[]): BatchLabel {
     }
   }
   return {
+    labelType: "BATCH_LABEL",
+    pageCount: 1,
     pickupCode,
     shNos: [...new Set(orders.map((order) => order.shNo))].sort(),
     lines: [...grouped.values()].sort((a, b) =>

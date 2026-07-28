@@ -58,6 +58,11 @@ const commandSchema = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("receiveFaulty"), serialNumber: z.string().min(1) }),
   z.object({
+    type: z.literal("startRepair"),
+    repairJobId: z.string().min(1),
+    remark: z.string().min(1),
+  }),
+  z.object({
     type: z.literal("completeRepair"),
     repairJobId: z.string().min(1),
     targetLocationCode: z.string().min(1),
@@ -70,6 +75,7 @@ const commandSchema = z.discriminatedUnion("type", [
     locationCode: z.string().min(1),
     sku: z.string().min(1),
     qty: z.number().positive(),
+    reason: z.string().min(1),
     remark: z.string().min(1),
     serialNumber: z.string().optional(),
   }),
@@ -96,7 +102,13 @@ const commandSchema = z.discriminatedUnion("type", [
 function errorResponse(error: unknown) {
   const message = error instanceof Error ? error.message : "Warehouse operation failed.";
   const status = error instanceof DomainError || error instanceof z.ZodError ? 400 : 500;
-  return NextResponse.json({ error: message }, { status });
+  const code =
+    error instanceof DomainError
+      ? error.code
+      : error instanceof z.ZodError
+        ? "INVALID_COMMAND"
+        : "INTERNAL_ERROR";
+  return NextResponse.json({ error: message, code }, { status });
 }
 
 export async function GET() {

@@ -339,6 +339,7 @@ function Dashboard({ state, warehouse }: { state: WmsState; warehouse: "SYD" | "
     ["Available Product Inventory", availableProduct, "New + Repair Good"],
     ["Frozen Inventory", frozen, "Prepared reservations"],
     ["Needs Allocation", state.dashboardTasks?.needsAllocation ?? 0, "Normal workflow queue"],
+    ["Allocated", state.dashboardTasks?.allocated ?? 0, "Location selected; not yet frozen"],
     ["Prepared", state.dashboardTasks?.prepared ?? prepared, "Physical unchanged; stock frozen"],
     ["Ready for Pickup", state.dashboardTasks?.readyForPickup ?? 0, "Pickup code issued"],
     ["Outbound Today", state.dashboardTasks?.outboundToday ?? 0, "Uses actual outboundAt"],
@@ -372,7 +373,7 @@ function Dashboard({ state, warehouse }: { state: WmsState; warehouse: "SYD" | "
       />
       <div className="grid metrics">
         {metrics.map(([label, value, meta], index) => (
-          <div className={cn("metric", index >= 9 && Number(value) > 0 && "alert")} key={label}>
+          <div className={cn("metric", index >= 10 && Number(value) > 0 && "alert")} key={label}>
             <div className="metric-label">{label}</div>
             <div className="metric-value">{value}</div>
             <div className="metric-meta">{meta}</div>
@@ -1148,8 +1149,23 @@ function RepairView({
               <div className="strong mono">{job.serialNumber ?? "Unknown legacy SN"}</div>
               <div className="subtle">{job.model} · {job.status} · {job.currentLocation}</div>
               <Button
+                disabled={!["Received", "Pending_Repair"].includes(job.status)}
+                onClick={() =>
+                  commit(
+                    {
+                      type: "startRepair",
+                      repairJobId: job.id,
+                      remark: "Warehouse repair work started.",
+                    },
+                    `${job.serialNumber ?? job.sku} moved to In Repair.`,
+                  )
+                }
+              >
+                <Wrench /> Start Repair
+              </Button>
+              <Button
                 className="primary"
-                disabled={!["Received", "Pending_Repair", "In_Repair"].includes(job.status)}
+                disabled={job.status !== "In_Repair"}
                 onClick={() =>
                   commit(
                     {

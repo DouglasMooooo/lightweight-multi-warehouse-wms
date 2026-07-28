@@ -1,21 +1,25 @@
 # Architecture
 
-Sprint 2 policy boundaries:
+Domain policy boundaries:
 
-- `ERPAdapter` owns replacement-order lookups and ERP write-back.
-- outbound application services separate import, allocation, preparation and dispatch transactions.
-- repair completion is a transactional inventory reclassification with audit evidence.
-- label aggregation, semantic reporting and reconciliation are pure domain policies and do not mutate inventory.
-- current balances remain controlled projections reconciled to the append-only transaction ledger.
+- `ERPAdapter` owns replacement/faulty lookups and ERP write-back.
+- Application services separate outbound import, allocation, preparation and dispatch transactions.
+- Repair start/completion is a transactional, audited lifecycle.
+- Label aggregation, semantic reporting and reconciliation are pure policies that do not mutate inventory.
+- Current balances are controlled projections reconciled to the append-only transaction ledger.
 
-The Preview uses one consistent command path:
+The command path is:
 
-`Next.js client UI → Route Handler → WmsApplicationService → domain rules → Prisma repository/transaction → PostgreSQL`
+`Next.js client UI -> Route Handler -> WmsApplicationService -> domain rules -> Prisma transaction -> PostgreSQL`
 
-Reads use `GET /api/wms`. Commands use `POST /api/wms` with a discriminated command DTO. Faulty ERP lookup uses `GET /api/wms/faulty-lookup`; the adapter is never imported by browser code.
+Reads use `GET /api/wms`. Commands use `POST /api/wms` with a discriminated DTO. Faulty ERP lookup uses `GET /api/wms/faulty-lookup`; adapters are never imported by browser code.
 
-`InventoryRepository.applyDelta()` is the shared Decimal balance mutation mechanism. Multi-entity operations use Serializable Prisma transactions with bounded conflict retries. Audit text is constructed from validated server data and receives a server-resolved actor (`Demo Supervisor` for this Sprint).
+`InventoryRepository.applyDelta()` is the shared Decimal balance mutation mechanism. Multi-entity operations use Serializable Prisma transactions with bounded conflict retries. All important state changes receive a server-resolved actor and audit record.
 
-The UI preserves the v0.1 layout. Its `WmsState` is a read DTO refreshed after commands, not an authoritative store. No normal execution path reads or writes warehouse data in localStorage.
+The UI preserves the Preview layout. `WmsState` is a read DTO refreshed after commands, not an authoritative store. No normal path reads or writes warehouse data in localStorage.
 
-ERP write-back is represented by durable `ERPSyncJob` rows. A confirmed warehouse transaction is not rolled back if a later external write fails.
+ERP write-back is represented by durable `ERPSyncJob` rows. A confirmed physical transaction is not rolled back if later external write-back fails.
+
+Lifecycle timestamps belong to their domain records: `importedAt`, `allocatedAt`, `preparedAt`, `readyForPickupAt`, `outboundAt`, `receivedAt`, `repairStartedAt` and `repairCompletedAt`. `StockTransaction.recordedAt` is immutable system evidence; `effectiveAt` is the business operation time used by movement reports.
+
+Validation failures cross the HTTP boundary as stable error codes plus operator-readable messages. UI components render state and submit commands; they do not decide stock eligibility, reconciliation classification, label grouping or reporting scope.

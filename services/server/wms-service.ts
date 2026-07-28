@@ -324,6 +324,8 @@ export class WmsApplicationService {
         warehouseCode: order.warehouse.code as WarehouseCode,
         status: order.status,
         createdAt: order.createdAt.toISOString(),
+        importedAt: order.importedAt?.toISOString(),
+        allocatedAt: order.allocatedAt?.toISOString(),
         preparedAt: order.preparedAt?.toISOString(),
         readyForPickupAt: order.readyForPickupAt?.toISOString(),
         outboundAt: order.outboundAt?.toISOString(),
@@ -431,6 +433,7 @@ export class WmsApplicationService {
         outcome: job.outcome ?? undefined,
         source: job.source,
         receivedAt: job.receivedAt.toISOString(),
+        repairStartedAt: job.repairStartedAt?.toISOString(),
         repairCompletedAt: job.repairCompletedAt?.toISOString(),
         returnedToStockAt: job.returnedToStockAt?.toISOString(),
         remark: job.remark,
@@ -456,13 +459,20 @@ export class WmsApplicationService {
           id: batch.id,
           code: batch.code,
           labelType: batch.labelType,
+          status: batch.status,
           shNos: [...new Set(batch.orders.map((order) => order.shNo))],
           lines: [...grouped.values()],
           readyAt: batch.readyAt?.toISOString(),
+          pickedUpAt: batch.pickedUpAt?.toISOString(),
+          carrier: batch.carrier ?? undefined,
+          customer: batch.customer ?? undefined,
+          collector: batch.collector ?? undefined,
+          remark: batch.remark ?? undefined,
         };
       }),
       dashboardTasks: {
         needsAllocation: orders.filter((row) => ["Imported", "Pending_Allocation"].includes(row.status)).length,
+        allocated: orders.filter((row) => row.status === "Allocated").length,
         prepared: orders.filter((row) => ["Prepared", "Partially_Prepared"].includes(row.status)).length,
         readyForPickup: orders.filter((row) => row.status === "Ready_for_Pickup").length,
         outboundToday: orders.filter(
@@ -510,6 +520,9 @@ export class WmsApplicationService {
       case "receiveFaulty":
         await this.receiveFaulty(command.serialNumber);
         break;
+      case "startRepair":
+        await this.startRepair(command.repairJobId, command.remark);
+        break;
       case "completeRepair":
         await this.completeRepair(command);
         break;
@@ -546,7 +559,11 @@ export class WmsApplicationService {
 
   private async importOutbound(shNo: string) {
     const erpOrder = await this.erp.getOutboundOrder(shNo.trim().toUpperCase());
-    if (!erpOrder) throw new DomainError("ERP_LOOKUP_FAILED: Replacement Unit Information was not found.");
+    if (!erpOrder)
+      throw new DomainError(
+        "Replacement Unit Information was not found.",
+        "ERP_LOOKUP_FAILED",
+      );
     await serializable(this.prisma, async (tx) => {
       const who = await actor(tx);
       const duplicate = await tx.outboundOrder.findUnique({ where: { shNo: erpOrder.shNo } });
@@ -566,16 +583,22 @@ export class WmsApplicationService {
         if (!mapping) throw new DomainError(`ERP warehouse mapping is missing for ${erpLine.erpWarehouse}.`);
         mappedLines.push({ erpLine, product, condition: mapping.condition });
       }
-      if (!mappedLines.length) throw new DomainError("ERP_LOOKUP_FAILED: Replacement Unit Information has no lines.");
+      if (!mappedLines.length)
+        throw new DomainError(
+          "Replacement Unit Information has no lines.",
+          "ERP_LOOKUP_FAILED",
+        );
       const order = await tx.outboundOrder.create({
         data: {
           shNo: erpOrder.shNo,
+          pickupCode: erpOrder.pickupCode,
           erpWarehouse:
             new Set(mappedLines.map((line) => line.erpLine.erpWarehouse)).size === 1
               ? mappedLines[0].erpLine.erpWarehouse
               : "Mixed ERP warehouses",
           warehouseId: warehouse.id,
           status: "Pending_Allocation",
+          importedAt: new Date(),
           customerLabel: erpOrder.customerLabel,
           lines: {
             create: mappedLines.map(({ erpLine, product, condition }) => ({
@@ -650,7 +673,10 @@ export class WmsApplicationService {
         .minus(balance.frozenQty)
         .minus(otherReserved._sum.quantity ?? 0);
       if (decimal(input.qty).greaterThan(allocatable))
-        throw new DomainError("INSUFFICIENT_AVAILABLE_STOCK");
+        throw new DomainError(
+          "Insufficient available stock after active allocations.",
+          "INSUFFICIENT_AVAILABLE_STOCK",
+        );
       await tx.outboundAllocation.create({
         data: {
           outboundOrderLineId: line.id,
@@ -670,7 +696,10 @@ export class WmsApplicationService {
       );
       await tx.outboundOrder.update({
         where: { id: input.orderId },
-        data: { status: complete ? "Allocated" : "Pending_Allocation" },
+        data: {
+          status: complete ? "Allocated" : "Pending_Allocation",
+          allocatedAt: complete ? new Date() : line.outboundOrder.allocatedAt,
+        },
       });
       await audit(tx, who, {
         operation: "Allocated outbound",
@@ -701,7 +730,7 @@ export class WmsApplicationService {
         ? line.allocations.filter((row) => input.allocationIds!.includes(row.id))
         : line.allocations;
       if (!selected.length || (input.allocationIds && selected.length !== input.allocationIds.length))
-        throw new DomainError("ORDER_NOT_ALLOCATED");
+        throw new DomainError("Outbound order has no eligible allocation.", "ORDER_NOT_ALLOCATED");
       const inventory = new InventoryRepository(tx);
       const at = new Date();
       let preparedDelta = decimal(0);
@@ -760,11 +789,12 @@ export class WmsApplicationService {
         code = code ?? (await pickupCode(tx, line.outboundOrder.warehouse, who));
         const batch = await tx.pickupBatch.upsert({
           where: { code },
-          update: { readyAt: at },
+          update: { readyAt: at, status: "Ready" },
           create: {
             code,
             warehouseId: line.outboundOrder.warehouseId,
             readyAt: at,
+            status: "Ready",
           },
         });
         batchId = batch.id;
@@ -943,6 +973,20 @@ export class WmsApplicationService {
         where: { id: order.id },
         data: { status: "Outbound", erpSyncStatus: "Pending", outboundAt },
       });
+      if (order.pickupBatchId) {
+        const remainingInBatch = await tx.outboundOrder.count({
+          where: {
+            pickupBatchId: order.pickupBatchId,
+            id: { not: order.id },
+            status: { notIn: ["Outbound", "ERP_Synced", "Cancelled"] },
+          },
+        });
+        if (remainingInBatch === 0)
+          await tx.pickupBatch.update({
+            where: { id: order.pickupBatchId },
+            data: { status: "Picked_Up", pickedUpAt: outboundAt },
+          });
+      }
       await tx.eRPSyncJob.create({
         data: {
           operationType: "Outbound",
@@ -1244,6 +1288,34 @@ export class WmsApplicationService {
     });
   }
 
+  private async startRepair(repairJobId: string, remark: string) {
+    await serializable(this.prisma, async (tx) => {
+      const who = await actor(tx);
+      const job = await tx.repairJob.findUnique({ where: { id: repairJobId } });
+      if (!job || !["Received", "Pending_Repair"].includes(job.status))
+        throw new DomainError(
+          "Repair job is not eligible to start.",
+          "INVALID_REPAIR_STATE",
+        );
+      const repairStartedAt = new Date();
+      await tx.repairJob.update({
+        where: { id: job.id },
+        data: {
+          status: "In_Repair",
+          repairStartedAt,
+          remark,
+        },
+      });
+      await audit(tx, who, {
+        operation: "Started repair",
+        entityType: "RepairJob",
+        entityId: job.id,
+        businessReference: job.originalShNo ?? undefined,
+        remark,
+      });
+    });
+  }
+
   private async legacyRepairGoodIn(input: Extract<WmsCommand, { type: "legacyRepairGoodIn" }>) {
     await serializable(this.prisma, async (tx) => {
       const who = await actor(tx);
@@ -1289,7 +1361,7 @@ export class WmsApplicationService {
           quantity: input.qty,
           physicalDelta: input.qty,
           operationId: operationId(),
-          reason: "Legacy / Manual Recognition",
+          reason: `Legacy / Manual Recognition: ${input.reason}`,
           remark: input.remark,
           createdById: who.id,
         },
@@ -1298,7 +1370,7 @@ export class WmsApplicationService {
         operation: "Recognised legacy Repair_Good",
         entityType: "InventoryBalance",
         entityId: `${warehouse.id}:${location.id}:${product.id}`,
-        remark: `${input.qty} recognised from Legacy / Manual source; no fabricated RepairJob was created.`,
+        remark: `${input.qty} recognised from Legacy / Manual source (${input.reason}); no fabricated RepairJob was created.`,
       });
     });
   }

@@ -1,12 +1,12 @@
 # Lightweight Multi-Warehouse WMS Preview
 
-Sprint 2 is a PostgreSQL-backed Next.js WMS Preview for SYD, MEL and BNE. PostgreSQL is the authoritative store; browser state is used only for filters and forms. Inventory-changing commands run through Route Handlers, application services, domain validation, Prisma transactions and the ERP adapter.
+The Domain Stabilisation release is a PostgreSQL-backed Next.js WMS Preview for SYD, MEL and BNE. PostgreSQL is authoritative; the Sydney workbook is read-only operational evidence. Inventory-changing commands run through Route Handlers, application services, domain validation, Prisma transactions and the ERP adapter.
 
-The operational outbound path is deliberately staged:
+The outbound lifecycle is deliberately staged:
 
-`ERP import → Pending Allocation → Allocated → Prepared/Frozen → Ready for Pickup → Outbound → ERP sync`
+`ERP import -> Pending Allocation -> Allocated -> Prepared/Frozen -> Ready for Pickup -> Outbound -> ERP sync`
 
-Sprint 2 also introduces native RepairJob completion, one-code/many-SH PickupBatch labels, product-driven machine reporting, explicit business timestamps, and read-only spreadsheet reconciliation policies.
+The release includes native repair start/completion, one-code/many-SH pickup labels, product-driven reporting, explicit business timestamps, structured validation codes and read-only balance/SN reconciliation.
 
 ## Requirements
 
@@ -32,7 +32,7 @@ pnpm dev
 
 Open `http://localhost:3000/dashboard`.
 
-For a deployment, run migrations non-interactively:
+For deployment, run migrations non-interactively:
 
 ```powershell
 pnpm prisma migrate deploy
@@ -40,7 +40,7 @@ pnpm prisma migrate deploy
 
 ## Demo reset
 
-Reset is available only when both `DEMO_MODE=true` and `NEXT_PUBLIC_DEMO_MODE=true`, and it is rejected when `NODE_ENV=production`. It clears and recreates the demo database through the server seed; it never uses localStorage.
+Reset is available only when both `DEMO_MODE=true` and `NEXT_PUBLIC_DEMO_MODE=true`, and is rejected when `NODE_ENV=production`. It clears and recreates demo data through the server seed; it never uses localStorage.
 
 ## Validation
 
@@ -53,6 +53,6 @@ pnpm lint
 pnpm build
 ```
 
-`ERP_ADAPTER=mock` keeps ERP calls server-side with deterministic Preview fixtures. The operational workbook at `reference/SYD_WMS_current_reference.xlsx` is read-only business evidence and is never modified or imported by the runtime. During pilot/shadow mode, reconciliation maps exported ledger values by semantic fields and reports differences without posting adjustments.
+`ERP_ADAPTER=mock` keeps ERP calls server-side with deterministic Preview fixtures. The operational workbook at `reference/SYD_WMS_current_reference.xlsx` is never modified or imported by the runtime. During shadow mode, reconciliation maps exported ledger values by semantic fields and reports differences without posting adjustments.
 
-See [Architecture](docs/ARCHITECTURE.md), [Data Model](docs/DATA_MODEL.md), [Business Rules](docs/BUSINESS_RULES.md), [Workflows](docs/WORKFLOWS.md), and [Assumptions](docs/ASSUMPTIONS.md).
+See [Architecture](docs/ARCHITECTURE.md), [Data Model](docs/DATA_MODEL.md), [Business Rules](docs/BUSINESS_RULES.md), [Workflows](docs/WORKFLOWS.md), [Reconciliation](docs/RECONCILIATION.md), [Cutover Plan](docs/CUTOVER_PLAN.md), and [Assumptions](docs/ASSUMPTIONS.md).

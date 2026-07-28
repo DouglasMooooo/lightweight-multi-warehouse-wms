@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { DomainError } from "@/domain/errors";
 import {
   applyBalanceDelta,
   assertFaultyReceiptAllowed,
@@ -62,6 +63,15 @@ describe("strict outbound serial validation", () => {
     expect(() => validateOutboundSerial({ ...valid, serialWarehouse: "MEL" })).toThrow("outbound warehouse"));
   it("rejects wrong location", () =>
     expect(() => validateOutboundSerial({ ...valid, serialLocation: "REPAIR-01" })).toThrow("allocated location"));
+  it("returns a stable code for operator-facing validation", () => {
+    try {
+      validateOutboundSerial({ ...valid, serialLocation: "REPAIR-01" });
+      throw new Error("Expected validation to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(DomainError);
+      expect((error as DomainError).code).toBe("SN_WRONG_LOCATION");
+    }
+  });
   it("rejects an already prepared serial", () =>
     expect(() => validateOutboundSerial({ ...valid, status: "Prepared" })).toThrow("another active order"));
 });

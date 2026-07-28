@@ -14,8 +14,12 @@
 - Allocation requires a physical location and creates relational demand against eligible stock; allocation alone changes neither Physical nor Frozen.
 - Prepared requires existing allocations. It leaves Physical unchanged and increases Frozen at each exact allocation grain.
 - Actual dispatch sets `OutboundOrder.outboundAt`; outbound reporting never substitutes `createdAt`.
+- Import, allocation, preparation and pickup readiness have separate timestamps and cannot stand in for actual dispatch.
 - One order line may allocate across several locations and may carry unit-level SN assignments without duplicating the order line.
 - A Pickup Code identifies one batch that may contain several SH documents, SKUs, models and ERP warehouses. Batch label rows aggregate only identical SKU + Model + ERP Warehouse values.
 - Faulty receipt creates a native RepairJob. Complete Repair reclassifies the same known serial from Repair to Repair_Good and returns it to `In_Stock` at a selected location.
 - Historical Repair_Good with no known repair record uses the explicit Legacy / Manual Recognition operation; it does not fabricate a repair lifecycle.
 - Spreadsheet reconciliation is read-only and never posts inventory adjustments automatically.
+- `reportMachine` is an explicit Product-master flag and is independent of `itemType`; reportable Material SKUs are valid.
+- Workbook rows explicitly marked as physical-location occupancy displays are excluded from inventory and reconciliation quantities.
+- SN reconciliation reports missing, wrong-location, wrong-condition and status mismatches, classifying known historical gaps separately from current errors.

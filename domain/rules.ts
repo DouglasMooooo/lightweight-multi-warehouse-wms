@@ -27,7 +27,8 @@ export function applyBalanceDelta(
 export function validatePreparation(requiredQty: number, preparedQty: number, availableQty: number, qty: number) {
   if (!(qty > 0)) throw new DomainError("Prepared quantity must be positive.");
   if (preparedQty + qty > requiredQty) throw new DomainError("Prepared quantity exceeds the requested quantity.");
-  if (qty > availableQty) throw new DomainError("Insufficient available stock.");
+  if (qty > availableQty)
+    throw new DomainError("Insufficient available stock.", "INSUFFICIENT_AVAILABLE_STOCK");
 }
 
 export function validateOutboundSerial(input: {
@@ -43,15 +44,21 @@ export function validateOutboundSerial(input: {
   allocatedToAnotherOrder: boolean;
 }) {
   if (input.serialSku !== input.requiredSku)
-    throw new DomainError("Serial number does not match the requested SKU.");
+    throw new DomainError("Serial number does not match the requested SKU.", "SN_WRONG_SKU");
   if (input.serialCondition !== input.requiredCondition)
-    throw new DomainError("Serial number condition does not match the outbound requirement.");
+    throw new DomainError(
+      "Serial number condition does not match the outbound requirement.",
+      "SN_WRONG_CONDITION",
+    );
   if (input.serialWarehouse !== input.requiredWarehouse)
-    throw new DomainError("Serial number is not in the outbound warehouse.");
+    throw new DomainError("Serial number is not in the outbound warehouse.", "SN_WRONG_WAREHOUSE");
   if (!input.serialLocation || !input.allocatedLocations.includes(input.serialLocation))
-    throw new DomainError("Serial number is not in an allocated location.");
+    throw new DomainError("Serial number is not in an allocated location.", "SN_WRONG_LOCATION");
   if (input.allocatedToAnotherOrder || input.status === "Prepared")
-    throw new DomainError("Serial number is allocated to another active order.");
+    throw new DomainError(
+      "Serial number is allocated to another active order.",
+      "SN_ALREADY_ALLOCATED",
+    );
   if (input.status !== "In_Stock")
     throw new DomainError("Serial number is not eligible for outbound allocation.");
 }
@@ -90,7 +97,10 @@ export function validateAdjustment(input: {
 
 export function assertFaultyReceiptAllowed(status: SerialStatus | undefined, hasActiveRepairReturn: boolean) {
   if (status === "Repair" || hasActiveRepairReturn)
-    throw new DomainError("This serial number has already been received into repair inventory.");
+    throw new DomainError(
+      "This serial number has already been received into repair inventory.",
+      "ALREADY_RECEIVED_FOR_REPAIR",
+    );
 }
 
 export function formatPickupCode(warehouse: WarehouseCode, sequence: number) {

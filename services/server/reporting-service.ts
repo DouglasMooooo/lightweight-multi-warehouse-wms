@@ -2,7 +2,12 @@ import "server-only";
 
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 import { DomainError } from "@/domain/errors";
-import { calendarMonth, mondayToSunday, operationalOrderMetrics } from "@/domain/reporting";
+import {
+  calendarMonth,
+  mondayToSunday,
+  operationalMovementMetrics,
+  operationalOrderMetrics,
+} from "@/domain/reporting";
 import { getPrisma } from "@/lib/prisma";
 
 export class OperationalReportingService {
@@ -21,7 +26,7 @@ export class OperationalReportingService {
   }
 
   async period(warehouseId: string, from: Date, to: Date) {
-    const [orders, returns, repairJobs, balances] = await Promise.all([
+    const [orders, returns, repairJobs, balances, movements, openExceptions] = await Promise.all([
       this.prisma.outboundOrder.findMany({
         where: {
           warehouseId,
@@ -47,6 +52,10 @@ export class OperationalReportingService {
         },
       }),
       this.prisma.inventoryBalance.findMany({ where: { warehouseId } }),
+      this.prisma.stockTransaction.findMany({
+        where: { warehouseId, effectiveAt: { gte: from, lte: to } },
+      }),
+      this.prisma.exception.count({ where: { status: { not: "Resolved" } } }),
     ]);
     const outbound = operationalOrderMetrics(
       orders.map((order) => ({
@@ -67,6 +76,16 @@ export class OperationalReportingService {
       from,
       to,
     );
+    const movement = operationalMovementMetrics(
+      movements.map((row) => ({
+        transactionType: row.transactionType,
+        condition: row.condition,
+        quantity: Number(row.quantity),
+        effectiveAt: row.effectiveAt.toISOString(),
+      })),
+      from,
+      to,
+    );
     const repairInventory = balances
       .filter((row) => row.condition === "Repair")
       .reduce((sum, row) => sum + Number(row.physicalQty), 0);
@@ -76,10 +95,8 @@ export class OperationalReportingService {
     return {
       period: { from: from.toISOString(), to: to.toISOString() },
       ...outbound,
-      afterSalesReturns: repairJobs.filter((row) => row.receivedAt >= from && row.receivedAt <= to).length,
-      repairCompleted: repairJobs.filter(
-        (row) => row.repairCompletedAt && row.repairCompletedAt >= from && row.repairCompletedAt <= to,
-      ).length,
+      ...movement,
+      afterSalesReturns: movement.faultyReturns,
       repairScrap: repairJobs.filter(
         (row) =>
           row.outcome === "Scrap" &&
@@ -92,6 +109,10 @@ export class OperationalReportingService {
       ).length,
       repairInventory,
       newInventory,
+      repairGoodInventory: balances
+        .filter((row) => row.condition === "Repair_Good")
+        .reduce((sum, row) => sum + Number(row.physicalQty), 0),
+      openOperationalExceptions: openExceptions,
     };
   }
 

@@ -18,6 +18,8 @@ export interface WorkflowOrder {
   shNo: string;
   status: "Pending_Allocation" | "Allocated" | "Prepared" | "Ready_for_Pickup" | "Outbound" | "ERP_Synced";
   createdAt: string;
+  importedAt?: string;
+  allocatedAt?: string;
   preparedAt?: string;
   readyForPickupAt?: string;
   outboundAt?: string;
@@ -32,6 +34,7 @@ export function importedOutbound(shNo: string, quantities: number[], createdAt: 
     shNo,
     status: "Pending_Allocation",
     createdAt,
+    importedAt: createdAt,
     lines: quantities.map((requiredQty) => ({
       requiredQty,
       allocatedQty: 0,
@@ -57,6 +60,7 @@ export function allocateLine(
   next.status = next.lines.every((row) => row.allocatedQty === row.requiredQty)
     ? "Allocated"
     : "Pending_Allocation";
+  if (next.status === "Allocated") next.allocatedAt = new Date().toISOString();
   return next;
 }
 

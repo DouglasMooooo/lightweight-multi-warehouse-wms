@@ -118,6 +118,8 @@ export interface OutboundOrder {
   warehouseCode: WarehouseCode;
   status: OrderStatus;
   createdAt: string;
+  importedAt?: string;
+  allocatedAt?: string;
   preparedAt?: string;
   readyForPickupAt?: string;
   outboundAt?: string;
@@ -181,6 +183,7 @@ export interface RepairJob {
   outcome?: "Repair_Good" | "Scrap" | "Returned_Unrepaired";
   source: "Native_Return" | "Legacy_Manual";
   receivedAt: string;
+  repairStartedAt?: string;
   repairCompletedAt?: string;
   returnedToStockAt?: string;
   remark: string;
@@ -197,13 +200,20 @@ export interface PickupBatch {
   id: string;
   code: string;
   labelType: "Batch_Label" | "Unit_SN_Label";
+  status?: "Draft" | "Ready" | "Picked_Up" | "Cancelled";
   shNos: string[];
   lines: PickupLabelLine[];
   readyAt?: string;
+  pickedUpAt?: string;
+  carrier?: string;
+  customer?: string;
+  collector?: string;
+  remark?: string;
 }
 
 export interface DashboardTasks {
   needsAllocation: number;
+  allocated: number;
   prepared: number;
   readyForPickup: number;
   outboundToday: number;
@@ -263,8 +273,9 @@ export type WmsCommand =
   | { type: "registerSerial"; serialNumber: string; sku: string; warehouseCode: WarehouseCode; locationCode: string; condition: StockCondition }
   | { type: "adjustStock"; direction: "In" | "Out"; warehouseCode: WarehouseCode; locationCode: string; sku?: string; itemType: ItemType; condition: StockCondition; qty: number; reason: string; remark: string; serialNumber?: string }
   | { type: "receiveFaulty"; serialNumber: string }
+  | { type: "startRepair"; repairJobId: string; remark: string }
   | { type: "completeRepair"; repairJobId: string; targetLocationCode: string; outcome: "Repair_Good" | "Scrap" | "Returned_Unrepaired"; remark: string }
-  | { type: "legacyRepairGoodIn"; warehouseCode: WarehouseCode; locationCode: string; sku: string; qty: number; remark: string; serialNumber?: string }
+  | { type: "legacyRepairGoodIn"; warehouseCode: WarehouseCode; locationCode: string; sku: string; qty: number; reason: string; remark: string; serialNumber?: string }
   | { type: "moveStock"; warehouseCode: WarehouseCode; sku: string; condition: StockCondition; fromLocation: string; toLocation: string; qty: number; remark: string; serialNumbers?: string[] }
   | { type: "dispatchTransfer"; transferId: string }
   | { type: "receiveTransfer"; transferId: string; destinationLocation: string }

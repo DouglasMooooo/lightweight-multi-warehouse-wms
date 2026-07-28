@@ -15,6 +15,10 @@ describe("PostgreSQL integrity migrations", () => {
     path.join(process.cwd(), "prisma/migrations/20260728020000_sprint2_ledger_parity/migration.sql"),
     "utf8",
   );
+  const stabilisation = fs.readFileSync(
+    path.join(process.cwd(), "prisma/migrations/20260728030000_domain_stabilisation/migration.sql"),
+    "utf8",
+  );
 
   it("normalizes nullable relational dimensions in the logical balance key", () => {
     expect(initial).toContain('CREATE UNIQUE INDEX "InventoryBalance_relational_grain_key"');
@@ -35,5 +39,13 @@ describe("PostgreSQL integrity migrations", () => {
     expect(sprint2).toContain('CREATE TABLE "RepairJob"');
     expect(sprint2).toContain('ADD COLUMN "outboundAt"');
     expect(sprint2).toContain('ADD COLUMN "reportMachine"');
+  });
+
+  it("adds import/allocation, repair-start and pickup lifecycle timestamps", () => {
+    expect(stabilisation).toContain('ADD COLUMN "importedAt"');
+    expect(stabilisation).toContain('ADD COLUMN "allocatedAt"');
+    expect(stabilisation).toContain('ADD COLUMN "repairStartedAt"');
+    expect(stabilisation).toContain('ADD COLUMN "pickedUpAt"');
+    expect(stabilisation).toContain('CREATE TYPE "PickupStatus"');
   });
 });

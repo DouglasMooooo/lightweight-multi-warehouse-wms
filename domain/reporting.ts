@@ -10,6 +10,13 @@ export interface ReportingReturn {
   receivedAt: string;
 }
 
+export interface ReportingMovement {
+  transactionType: string;
+  condition: string;
+  quantity: number;
+  effectiveAt: string;
+}
+
 const inPeriod = (value: string | undefined, from: Date, to: Date) => {
   if (!value) return false;
   const at = new Date(value);
@@ -44,6 +51,30 @@ export function operationalOrderMetrics(
     outboundShCount: outboundSh.size,
     outstandingReturns,
     machineMovements: Object.fromEntries(machineMovements),
+  };
+}
+
+export function operationalMovementMetrics(
+  movements: ReportingMovement[],
+  from: Date,
+  to: Date,
+) {
+  const period = movements.filter((row) => inPeriod(row.effectiveAt, from, to));
+  const sum = (predicate: (row: ReportingMovement) => boolean) =>
+    period.filter(predicate).reduce((total, row) => total + row.quantity, 0);
+  return {
+    newInbound: sum((row) => row.transactionType === "Inbound" && row.condition === "New"),
+    newOutbound: sum((row) => row.transactionType === "Outbound" && row.condition === "New"),
+    repairGoodInbound: sum(
+      (row) =>
+        row.condition === "Repair_Good" &&
+        ["Inbound", "Repair_Completed", "RepairGood_Adjustment_In"].includes(row.transactionType),
+    ),
+    repairGoodOutbound: sum(
+      (row) => row.transactionType === "Outbound" && row.condition === "Repair_Good",
+    ),
+    faultyReturns: sum((row) => row.transactionType === "Return_to_Repair"),
+    repairCompleted: sum((row) => row.transactionType === "Repair_Completed"),
   };
 }
 

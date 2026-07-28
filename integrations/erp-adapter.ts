@@ -18,6 +18,7 @@ export interface ERPOutboundLine {
 export interface ERPOutboundOrder {
   shNo: string;
   physicalWarehouseCode: string;
+  pickupCode?: string;
   customerLabel?: string;
   replacementUnitInformation: ERPOutboundLine[];
 }
