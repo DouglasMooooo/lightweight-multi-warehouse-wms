@@ -173,6 +173,7 @@ model Container {
   warehouse   Warehouse          @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
   balances    InventoryBalance[]
   transactions StockTransaction[]
+  outboundAllocations OutboundAllocation[]
 
   @@unique([warehouseId, code])
 }
@@ -299,6 +300,7 @@ model OutboundAllocation {
   id                  String            @id @default(cuid())
   outboundOrderLineId String
   locationId          String
+  containerId         String?
   serialNumberId      String?
   quantity            Decimal           @db.Decimal(18, 3)
   preparedAt          DateTime?
@@ -306,10 +308,12 @@ model OutboundAllocation {
   createdAt           DateTime          @default(now())
   outboundOrderLine   OutboundOrderLine @relation(fields: [outboundOrderLineId], references: [id], onDelete: Cascade)
   location            Location          @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  container           Container?        @relation(fields: [containerId], references: [id], onDelete: Restrict)
   serialNumber        SerialNumber?     @relation(fields: [serialNumberId], references: [id], onDelete: Restrict)
 
   @@index([outboundOrderLineId])
   @@index([locationId])
+  @@index([containerId])
 }
 
 model RepairReturn {
@@ -320,6 +324,8 @@ model RepairReturn {
   relatedShNo      String?
   erpMatched       Boolean       @default(false)
   manualReview     Boolean       @default(false)
+  active           Boolean       @default(true)
+  completedAt      DateTime?
   receivedAt       DateTime      @default(now())
   remark           String
   serialNumber     SerialNumber  @relation(fields: [serialNumberId], references: [id], onDelete: Restrict)

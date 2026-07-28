@@ -1,21 +1,7 @@
-# ERP integration
+# ERP Integration
 
-`ERPAdapter` prevents domain code from depending on a vendor.
+`ERPAdapter` defines server-side lookup, order retrieval, transfer retrieval and write-back. Sprint 1 uses `MockERPAdapter`; browser components do not instantiate adapters.
 
-Current conceptual operations:
+Faulty lookup failure creates an operational exception and does not invent SKU, model or SH data. Outbound and transfer confirmation create durable sync jobs. External failure is handled by Failed/Retrying/Manual Review state in later workers and never rewrites confirmed physical history.
 
-- `findBySerialNumber`
-- `getOutboundOrder`
-- `getTransferOrder`
-- `writeBackOutbound`
-- `writeBackTransfer`
-- `healthCheck`
-
-`MockERPAdapter` contains fixtures outside inventory services. Faulty SN `60E5M4805C3F242` returns SH `SH-2607-00165610`, SKU `97-223-00107-00`, model EQ4800-S and a return-expected status.
-
-Replacement outbound uses the ERP replacement structure, not faulty-unit details. ERP warehouse labels are mapped in master data:
-
-- `悉尼物料仓` → New
-- `悉尼良品仓` → Repair_Good
-
-Production write-back is an outbox-style process through `ERPSyncJob`. Statuses are Pending, Synced, Failed, Retrying and Manual_Review. Retry is idempotent by entity and operation reference.
+Production Kingdee connectivity, credentials, retry workers and webhook reconciliation remain Sprint 2 scope.

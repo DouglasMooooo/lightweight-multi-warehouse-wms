@@ -29,18 +29,6 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
-import { demoState } from "@/domain/demo-data";
-import {
-  adjustStock,
-  dispatchOutbound,
-  dispatchTransfer,
-  moveStock,
-  prepareOutbound,
-  receiveFaulty,
-  receiveTransfer,
-  registerSerial,
-  scanOutboundSerial,
-} from "@/domain/operations";
 import type {
   AuditEntry,
   InventoryBalance,
@@ -48,10 +36,9 @@ import type {
   SerialNumber,
   StockCondition,
   WmsState,
+  WmsCommand,
 } from "@/domain/types";
-import { MockERPAdapter } from "@/integrations/mock-erp-adapter";
-
-const STORAGE_KEY = "foxess-wms-preview-v1";
+import type { ERPSerialLookup } from "@/integrations/erp-adapter";
 
 const nav = [
   {
@@ -86,6 +73,8 @@ const nav = [
     ],
   },
 ] as const;
+
+const demoMode = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
 
 const routeTitles: Record<string, string> = {
   dashboard: "Operations Dashboard",
@@ -165,29 +154,30 @@ function Empty({ label }: { label: string }) {
 
 export function WmsApp({ path }: { path: string[] }) {
   const section = path[0] ?? "dashboard";
-  const [state, setState] = useState<WmsState>(() => structuredClone(demoState));
+  const [state, setState] = useState<WmsState | null>(null);
   const [ready, setReady] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [warehouse, setWarehouse] = useState<"SYD" | "MEL" | "BNE">("SYD");
   const [toast, setToast] = useState<{ message: string; error?: boolean } | null>(null);
 
   useEffect(() => {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) {
-      try {
-        // Loading the external demo snapshot is the one intentional hydration update.
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setState(JSON.parse(stored) as WmsState);
-      } catch {
-        localStorage.removeItem(STORAGE_KEY);
-      }
-    }
-    setReady(true);
+    let active = true;
+    fetch("/api/wms", { cache: "no-store" })
+      .then(async (response) => {
+        const body = (await response.json()) as WmsState | { error: string };
+        if (!response.ok) throw new Error("error" in body ? body.error : "Unable to load warehouse data.");
+        if (active) setState(body as WmsState);
+      })
+      .catch((error: unknown) => {
+        if (active) setToast({ message: error instanceof Error ? error.message : "Unable to load warehouse data.", error: true });
+      })
+      .finally(() => {
+        if (active) setReady(true);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
-
-  useEffect(() => {
-    if (ready) localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  }, [state, ready]);
 
   useEffect(() => {
     if (!toast) return;
@@ -195,21 +185,29 @@ export function WmsApp({ path }: { path: string[] }) {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
-  function commit(operation: (current: WmsState) => WmsState, success: string) {
+  async function commit(command: WmsCommand, success: string) {
     try {
-      setState((current) => operation(current));
+      const response = await fetch("/api/wms", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(command),
+      });
+      const body = (await response.json()) as WmsState | { error: string };
+      if (!response.ok) throw new Error("error" in body ? body.error : "Operation failed.");
+      setState(body as WmsState);
       setToast({ message: success });
+      return true;
     } catch (error) {
       setToast({ message: error instanceof Error ? error.message : "Operation failed.", error: true });
+      return false;
     }
   }
 
-  function resetDemo() {
-    const next = structuredClone(demoState);
-    setState(next);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-    setToast({ message: "Demo data restored to the validated starting state." });
+  async function resetDemo() {
+    await commit({ type: "resetDemo" }, "Demo database restored to the validated starting state.");
   }
+
+  if (!ready || !state) return <div className="empty">Loading database-backed warehouse data…</div>;
 
   if (section === "outbound" && path[2] === "label") {
     const order = state.outboundOrders.find((row) => row.id === path[1]);
@@ -281,9 +279,11 @@ export function WmsApp({ path }: { path: string[] }) {
                 </option>
               ))}
             </select>
-            <Button className="ghost" onClick={resetDemo} title="Reset demo data" aria-label="Reset demo data">
-              <RotateCcw />
-            </Button>
+            {demoMode && (
+              <Button className="ghost" onClick={resetDemo} title="Reset demo data" aria-label="Reset demo data">
+                <RotateCcw />
+              </Button>
+            )}
           </div>
         </header>
         <div className="content">
@@ -621,7 +621,7 @@ function OutboundDetail({
 }: {
   state: WmsState;
   orderId: string;
-  commit: (operation: (state: WmsState) => WmsState, success: string) => void;
+  commit: (command: WmsCommand, success: string) => Promise<boolean>;
 }) {
   const order = state.outboundOrders.find((row) => row.id === orderId);
   const [scan, setScan] = useState("");
@@ -644,14 +644,14 @@ function OutboundDetail({
     order.status !== "Outbound";
   const step = order.status === "Outbound" ? 5 : line.scannedSerials.length === line.requiredQty ? 4 : line.preparedQty ? 3 : 1;
 
-  function scanSerial(event: FormEvent) {
+  async function scanSerial(event: FormEvent) {
     event.preventDefault();
     if (!scan.trim()) return;
-    commit(
-      (current) => scanOutboundSerial(current, activeOrderId, activeLineId, scan.trim().toUpperCase()),
+    const accepted = await commit(
+      { type: "scanOutboundSerial", orderId: activeOrderId, lineId: activeLineId, serialNumber: scan.trim().toUpperCase() },
       `Serial ${scan.trim().toUpperCase()} allocated to ${activeOrderShNo}.`,
     );
-    setScan("");
+    if (accepted) setScan("");
   }
 
   return (
@@ -671,7 +671,7 @@ function OutboundDetail({
               className="primary"
               disabled={!canDispatch}
               onClick={() =>
-                commit((current) => dispatchOutbound(current, order.id), `${order.shNo} dispatched; ERP sync queued.`)
+                commit({ type: "dispatchOutbound", orderId: order.id }, `${order.shNo} dispatched; ERP sync queued.`)
               }
             >
               <Truck /> Confirm dispatch
@@ -753,9 +753,14 @@ function OutboundDetail({
                       className="primary"
                       onClick={() =>
                         commit(
-                          (current) =>
-                            prepareOutbound(current, order.id, line.id, row.locationCode, line.requiredQty - line.preparedQty),
-                          `${line.requiredQty - line.preparedQty} units prepared at ${row.locationCode}; physical quantity unchanged.`,
+                          {
+                            type: "prepareOutbound",
+                            orderId: order.id,
+                            lineId: line.id,
+                            locationCode: row.locationCode,
+                            qty: Math.min(row.availableQty, line.requiredQty - line.preparedQty),
+                          },
+                          `${Math.min(row.availableQty, line.requiredQty - line.preparedQty)} units prepared at ${row.locationCode}; physical quantity unchanged.`,
                         )
                       }
                     >
@@ -807,6 +812,14 @@ function OutboundDetail({
               <Summary label="ERP warehouse" value={order.erpWarehouse} />
               <Summary label="Physical warehouse" value={order.warehouseCode} />
               <Summary label="Allocation" value={line.allocationLocation ?? "Not allocated"} />
+              <Summary
+                label="Allocation detail"
+                value={
+                  line.allocations.length
+                    ? line.allocations.map((row) => `${row.locationCode} × ${row.quantity}`).join("; ")
+                    : "Not allocated"
+                }
+              />
               <Summary label="ERP sync" value={order.erpSyncStatus} />
             </div>
           </div>
@@ -840,7 +853,7 @@ function ReceivingView({
   commit,
 }: {
   state: WmsState;
-  commit: (operation: (state: WmsState) => WmsState, success: string) => void;
+  commit: (command: WmsCommand, success: string) => Promise<boolean>;
 }) {
   const [tab, setTab] = useState("Standard Inbound");
   function receive(event: FormEvent<HTMLFormElement>) {
@@ -848,8 +861,9 @@ function ReceivingView({
     const data = new FormData(event.currentTarget);
     const sku = String(data.get("sku"));
     const serial = String(data.get("serial") ?? "").trim();
-    commit((current) => {
-      let next = adjustStock(current, {
+    commit(
+      {
+        type: "adjustStock",
         direction: "In",
         warehouseCode: "SYD",
         locationCode: String(data.get("location")),
@@ -859,17 +873,10 @@ function ReceivingView({
         qty: Number(data.get("qty")),
         reason: "Standard inbound",
         remark: String(data.get("remark")),
-      });
-      if (serial) {
-        next = registerSerial(next, {
-          serialNumber: serial.toUpperCase(),
-          sku,
-          warehouseCode: "SYD",
-          locationCode: String(data.get("location")),
-        });
-      }
-      return next;
-    }, "Standard inbound recorded and inventory updated.");
+        serialNumber: serial ? serial.toUpperCase() : undefined,
+      },
+      "Standard inbound recorded and inventory updated.",
+    );
   }
   return (
     <>
@@ -978,16 +985,16 @@ function RepairView({
   commit,
 }: {
   state: WmsState;
-  commit: (operation: (state: WmsState) => WmsState, success: string) => void;
+  commit: (command: WmsCommand, success: string) => Promise<boolean>;
 }) {
-  const adapter = useMemo(() => new MockERPAdapter(), []);
   const [serial, setSerial] = useState("60E5M4805C3F242");
-  const [record, setRecord] = useState<Awaited<ReturnType<typeof adapter.findBySerialNumber>>>(null);
+  const [record, setRecord] = useState<ERPSerialLookup | null>(null);
   const [searched, setSearched] = useState(false);
   async function lookup(event: FormEvent) {
     event.preventDefault();
-    const result = await adapter.findBySerialNumber(serial);
-    setRecord(result);
+    const response = await fetch(`/api/wms/faulty-lookup?serialNumber=${encodeURIComponent(serial)}`, { cache: "no-store" });
+    const result = (await response.json()) as ERPSerialLookup | { error: string };
+    setRecord(response.ok ? (result as ERPSerialLookup) : null);
     setSearched(true);
   }
   return (
@@ -1041,7 +1048,7 @@ function RepairView({
                     className="primary"
                     onClick={() =>
                       commit(
-                        (current) => receiveFaulty(current, record),
+                        { type: "receiveFaulty", serialNumber: record.serialNumber },
                         `${record.serialNumber} received to REPAIR-01 with status Repair.`,
                       )
                     }
@@ -1076,14 +1083,14 @@ function MoveView({
   commit,
 }: {
   state: WmsState;
-  commit: (operation: (state: WmsState) => WmsState, success: string) => void;
+  commit: (command: WmsCommand, success: string) => Promise<boolean>;
 }) {
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     commit(
-      (current) =>
-        moveStock(current, {
+      {
+        type: "moveStock",
           warehouseCode: "SYD",
           sku: String(data.get("sku")),
           condition: String(data.get("condition")) as StockCondition,
@@ -1091,7 +1098,7 @@ function MoveView({
           toLocation: String(data.get("to")),
           qty: Number(data.get("qty")),
           remark: String(data.get("remark")),
-        }),
+      },
       "Move completed atomically. Warehouse total is unchanged.",
     );
   }
@@ -1192,7 +1199,7 @@ function AdjustmentView({
   commit,
 }: {
   state: WmsState;
-  commit: (operation: (state: WmsState) => WmsState, success: string) => void;
+  commit: (command: WmsCommand, success: string) => Promise<boolean>;
 }) {
   const [noSku, setNoSku] = useState(false);
   function submit(event: FormEvent<HTMLFormElement>) {
@@ -1200,8 +1207,8 @@ function AdjustmentView({
     const data = new FormData(event.currentTarget);
     const itemType = String(data.get("itemType")) as "Product" | "Material";
     commit(
-      (current) =>
-        adjustStock(current, {
+      {
+        type: "adjustStock",
           direction: String(data.get("direction")) as "In" | "Out",
           warehouseCode: "SYD",
           locationCode: String(data.get("location")),
@@ -1211,7 +1218,7 @@ function AdjustmentView({
           qty: Number(data.get("qty")),
           reason: String(data.get("reason")),
           remark: String(data.get("remark")),
-        }),
+      },
       "Adjustment transaction recorded and current stock updated.",
     );
   }
@@ -1409,7 +1416,7 @@ function TransferView({
   commit,
 }: {
   state: WmsState;
-  commit: (operation: (state: WmsState) => WmsState, success: string) => void;
+  commit: (command: WmsCommand, success: string) => Promise<boolean>;
 }) {
   return (
     <>
@@ -1461,7 +1468,7 @@ function TransferView({
                         className="primary small"
                         onClick={() =>
                           commit(
-                            (current) => dispatchTransfer(current, transfer.id),
+                            { type: "dispatchTransfer", transferId: transfer.id },
                             `${transfer.transferNo} dispatched; serial now In Transit.`,
                           )
                         }
@@ -1474,7 +1481,7 @@ function TransferView({
                         className="primary small"
                         onClick={() =>
                           commit(
-                            (current) => receiveTransfer(current, transfer.id, "M1-1-1-L"),
+                            { type: "receiveTransfer", transferId: transfer.id, destinationLocation: "M1-1-1-L" },
                             `${transfer.transferNo} received into MEL at M1-1-1-L.`,
                           )
                         }

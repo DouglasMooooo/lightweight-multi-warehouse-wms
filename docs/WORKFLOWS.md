@@ -1,38 +1,19 @@
 # Workflows
 
-## Prepare and dispatch
+## Prepare and outbound
 
-1. Load ERP/SH order and its Replacement Unit Information.
-2. Show eligible inventory by physical location and condition.
-3. Allocate no more than Available Qty.
-4. Prepare: Physical unchanged; Frozen increases.
-5. Generate a concurrency-safe warehouse pickup code.
-6. Print the batch label without changing inventory.
-7. Scan N unique matching SNs for an SN-tracked Qty N.
-8. Confirm dispatch: Physical and Frozen both decrease.
-9. Mark SNs Outbound, audit the operation and queue ERP write-back.
+Prepare validates available stock per location, creates an allocation, freezes that location's quantity, updates totals, atomically generates a pickup code if needed, and writes transaction/audit rows. Repeating prepare at another location creates another allocation.
+
+SN scan converts one aggregate prepared unit at the SN's location into a unit allocation. Dispatch requires prepared totals and all required unit SN allocations, consumes each exact balance, marks SNs Outbound and queues ERP sync.
 
 ## Faulty return
 
-1. Scan SN.
-2. Query `ERPAdapter.findBySerialNumber`.
-3. Display related SH, SKU, model and ERP status.
-4. Confirm SYD receipt to `REPAIR-01`.
-5. Create Return_to_Repair, increase Repair physical inventory and set SN status Repair.
-6. If lookup fails, create Manual Review; do not guess data.
+The server calls `ERPAdapter.findBySerialNumber()`. A missing record creates an ERP lookup exception. Confirmed receipt revalidates ERP data, enforces active-return idempotency, adds one Repair physical unit at SYD/REPAIR-01, updates the SN and writes transaction/audit rows atomically.
 
-## Move
+## Move and adjustment
 
-Validate same warehouse, distinct locations and sufficient Available Qty. In one transaction, decrement source and increment destination. Create one Move business record and one audit entry.
-
-## Adjustment
-
-Validate supervisor permission, item rules, quantity, reason and remark. Create Adjustment_In or Adjustment_Out and update the single relevant balance. Adjustment never impersonates Move.
+Move validates both locations in the same warehouse and updates source, destination, selected SNs, one Move transaction and audit atomically. Adjustment uses one signed physical delta and cannot consume Frozen stock.
 
 ## Transfer
 
-Transfer Out decreases source Physical, increases In Transit and sets SN In_Transit. Transfer In decreases In Transit, increases destination Physical, and sets the SN’s warehouse/location and state to In_Stock.
-
-## Stocktake
-
-Capture an expected snapshot including Physical, Frozen and Available. Operators count quantity/SNs. Variance requires supervisor review; approval creates explicit adjustment transactions.
+Transfer Out removes source Physical, adds source-balance In Transit, updates SNs and writes Transfer_Out. Transfer In releases In Transit, adds destination Physical, relocates SNs and writes Transfer_In.

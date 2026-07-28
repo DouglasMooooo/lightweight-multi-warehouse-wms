@@ -1,29 +1,15 @@
-# Data model
+# Data Model
 
-## Master data
+`InventoryBalance` is grouped by warehouse, physical location, optional container, optional product, item type and condition. PostgreSQL migration `20260727000000_init` enforces one logical row with an expression unique index:
 
-- `Warehouse` supports SYD, MEL, BNE and future sites without schema change.
-- `Location` belongs to a warehouse and stores rack/service-zone metadata.
-- `Product` owns SKU, model, Item Type and serial-tracking policy.
-- `Container` is optional and lightweight; the Preview does not model a full pallet lifecycle.
-- `ERPWarehouseMapping` maps an ERP warehouse label to a WMS stock condition.
+`warehouseId, locationId, COALESCE(containerId, ''), COALESCE(productId, ''), itemType, condition`
 
-## Inventory and traceability
+This is relational null-normalization, not a concatenated business key. Database checks prevent negative physical/frozen/in-transit values and frozen quantity greater than physical.
 
-- `InventoryBalance` is the fast current-state table keyed by relational warehouse, location, optional container, optional product and condition fields.
-- `StockTransaction` is the audit ledger with explicit physical, frozen and in-transit deltas.
-- `operationId` groups the business operation. One Move row carries both source and destination.
-- `SerialNumber` is globally unique and stores current warehouse, location, condition and state.
+`OutboundOrderLine` has many `OutboundAllocation` rows. Each allocation records location, quantity, optional container, optional serial, prepared time and dispatched time. A partial unique index prevents one serial from belonging to multiple undispatched allocations.
 
-The migration adds an expression unique index using `COALESCE` for optional product/container fields. This avoids PostgreSQL nullable-unique gaps without concatenated business keys.
+`RepairReturn.active` plus a partial unique index on `serialNumberId` prevents duplicate active repair receipt. `SerialNumber` remains a first-class ledger entity.
 
-## Operational documents
+Available quantity is calculated as `physicalQty - frozenQty`; it is not stored. Quantities use PostgreSQL `Decimal(18,3)` and Prisma Decimal.
 
-- Outbound: `OutboundOrder`, `OutboundOrderLine`, `OutboundAllocation`.
-- Repair: `RepairReturn`.
-- Transfer: `TransferOrder`, `TransferOrderLine`, `TransferSerial`.
-- Stocktake: `Stocktake`, `StocktakeLine`.
-- Integration: `ERPDocument`, `ERPSyncJob`.
-- Control: `PickupSequence`, `AuditLog`, `Exception`, `User`, `Role`.
-
-Indexes cover SKU, SN, SH, pickup code, order/transfer status, warehouse/location and transaction time.
+`PickupSequence` is updated atomically and the issued value is derived from the returned incremented row. It never uses `MAX(code) + 1`.

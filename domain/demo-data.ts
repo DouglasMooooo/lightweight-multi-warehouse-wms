@@ -68,7 +68,7 @@ export const demoState: WmsState = {
       customerLabel: "Service replacement",
       erpSyncStatus: "Pending",
       lines: [
-        { id: "line-1", sku: "97-223-00107-00", model: "EQ4800-S", requiredQty: 2, requiredCondition: "New", allocatedQty: 2, preparedQty: 2, dispatchedQty: 0, allocationLocation: "FLEX-01", scannedSerials: [] },
+        { id: "line-1", sku: "97-223-00107-00", model: "EQ4800-S", requiredQty: 2, requiredCondition: "New", allocatedQty: 2, preparedQty: 2, dispatchedQty: 0, allocationLocation: "FLEX-01", allocations: [], scannedSerials: [] },
       ],
     },
     {
@@ -81,7 +81,7 @@ export const demoState: WmsState = {
       customerLabel: "Repair-good replacement",
       erpSyncStatus: "Pending",
       lines: [
-        { id: "line-2", sku: "97-229-00012-00", model: "CQ6-M", requiredQty: 1, requiredCondition: "Repair_Good", allocatedQty: 0, preparedQty: 0, dispatchedQty: 0, scannedSerials: [] },
+        { id: "line-2", sku: "97-229-00012-00", model: "CQ6-M", requiredQty: 1, requiredCondition: "Repair_Good", allocatedQty: 0, preparedQty: 0, dispatchedQty: 0, allocations: [], scannedSerials: [] },
       ],
     },
   ],
