@@ -1,5 +1,13 @@
 # Architecture
 
+Sprint 2 policy boundaries:
+
+- `ERPAdapter` owns replacement-order lookups and ERP write-back.
+- outbound application services separate import, allocation, preparation and dispatch transactions.
+- repair completion is a transactional inventory reclassification with audit evidence.
+- label aggregation, semantic reporting and reconciliation are pure domain policies and do not mutate inventory.
+- current balances remain controlled projections reconciled to the append-only transaction ledger.
+
 The Preview uses one consistent command path:
 
 `Next.js client UI → Route Handler → WmsApplicationService → domain rules → Prisma repository/transaction → PostgreSQL`

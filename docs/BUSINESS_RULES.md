@@ -10,3 +10,12 @@
 - Transfer requires different warehouses. Transfer Out changes SN to In_Transit; Transfer In changes it to In_Stock at the destination.
 - Historical stock transactions are append-only in application workflows.
 - ERP warehouse classification never replaces physical warehouse/location.
+- ERP Replacement Unit Information import creates `Pending_Allocation` demand only. It never freezes inventory and never reads Faulty Unit Information as the replacement SKU.
+- Allocation requires a physical location and creates relational demand against eligible stock; allocation alone changes neither Physical nor Frozen.
+- Prepared requires existing allocations. It leaves Physical unchanged and increases Frozen at each exact allocation grain.
+- Actual dispatch sets `OutboundOrder.outboundAt`; outbound reporting never substitutes `createdAt`.
+- One order line may allocate across several locations and may carry unit-level SN assignments without duplicating the order line.
+- A Pickup Code identifies one batch that may contain several SH documents, SKUs, models and ERP warehouses. Batch label rows aggregate only identical SKU + Model + ERP Warehouse values.
+- Faulty receipt creates a native RepairJob. Complete Repair reclassifies the same known serial from Repair to Repair_Good and returns it to `In_Stock` at a selected location.
+- Historical Repair_Good with no known repair record uses the explicit Legacy / Manual Recognition operation; it does not fabricate a repair lifecycle.
+- Spreadsheet reconciliation is read-only and never posts inventory adjustments automatically.

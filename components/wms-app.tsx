@@ -211,7 +211,7 @@ export function WmsApp({ path }: { path: string[] }) {
 
   if (section === "outbound" && path[2] === "label") {
     const order = state.outboundOrders.find((row) => row.id === path[1]);
-    return order ? <LabelView order={order} /> : <div className="empty">Order not found.</div>;
+    return order ? <LabelView order={order} state={state} /> : <div className="empty">Order not found.</div>;
   }
 
   const title = routeTitles[section] ?? "Warehouse Operations";
@@ -293,7 +293,7 @@ export function WmsApp({ path }: { path: string[] }) {
             (path[1] ? (
               <OutboundDetail state={state} orderId={path[1]} commit={commit} />
             ) : (
-              <OutboundList state={state} warehouse={warehouse} />
+              <OutboundList state={state} warehouse={warehouse} commit={commit} />
             ))}
           {section === "receiving" && <ReceivingView state={state} commit={commit} />}
           {section === "repair" && <RepairView state={state} commit={commit} />}
@@ -338,11 +338,15 @@ function Dashboard({ state, warehouse }: { state: WmsState; warehouse: "SYD" | "
   const metrics = [
     ["Available Product Inventory", availableProduct, "New + Repair Good"],
     ["Frozen Inventory", frozen, "Prepared reservations"],
-    ["Prepared Orders", prepared, "Physical stock unchanged"],
-    ["Awaiting Pickup", state.outboundOrders.filter((row) => row.status === "Ready_for_Pickup").length, "Pickup code issued"],
-    ["Faulty Units Received", state.faultyReceivedCount, "This Preview period"],
-    ["Transfers In Transit", inTransit, "Between warehouses"],
-    ["Open Exceptions", state.exceptions.filter((row) => row.status !== "Resolved").length, "Requires attention"],
+    ["Needs Allocation", state.dashboardTasks?.needsAllocation ?? 0, "Normal workflow queue"],
+    ["Prepared", state.dashboardTasks?.prepared ?? prepared, "Physical unchanged; stock frozen"],
+    ["Ready for Pickup", state.dashboardTasks?.readyForPickup ?? 0, "Pickup code issued"],
+    ["Outbound Today", state.dashboardTasks?.outboundToday ?? 0, "Uses actual outboundAt"],
+    ["Repair Queue", state.dashboardTasks?.repairQueue ?? 0, "Received / pending / in repair"],
+    ["Repair Putaway", state.dashboardTasks?.repairCompletedAwaitingPutaway ?? 0, "Completed awaiting stock return"],
+    ["Transfers In Transit", state.dashboardTasks?.transfersInTransit ?? inTransit, "Between warehouses"],
+    ["Reconciliation Issues", state.dashboardTasks?.reconciliationIssues ?? 0, "Spreadsheet shadow comparison"],
+    ["ERP Sync Failures", state.dashboardTasks?.erpSyncFailures ?? 0, "Physical operations remain confirmed"],
   ];
   const actions = [
     ["/outbound", "Prepare orders", "Allocate and freeze stock", PackageCheck],
@@ -368,7 +372,7 @@ function Dashboard({ state, warehouse }: { state: WmsState; warehouse: "SYD" | "
       />
       <div className="grid metrics">
         {metrics.map(([label, value, meta], index) => (
-          <div className={cn("metric", index === 6 && Number(value) > 0 && "alert")} key={label}>
+          <div className={cn("metric", index >= 9 && Number(value) > 0 && "alert")} key={label}>
             <div className="metric-label">{label}</div>
             <div className="metric-value">{value}</div>
             <div className="metric-meta">{meta}</div>
@@ -552,8 +556,17 @@ function InventoryView({ state, warehouse }: { state: WmsState; warehouse: "SYD"
   );
 }
 
-function OutboundList({ state, warehouse }: { state: WmsState; warehouse: "SYD" | "MEL" | "BNE" }) {
+function OutboundList({
+  state,
+  warehouse,
+  commit,
+}: {
+  state: WmsState;
+  warehouse: "SYD" | "MEL" | "BNE";
+  commit: (command: WmsCommand, success: string) => Promise<boolean>;
+}) {
   const [query, setQuery] = useState("");
+  const [importSh, setImportSh] = useState("");
   const orders = state.outboundOrders.filter(
     (order) =>
       order.warehouseCode === warehouse &&
@@ -566,6 +579,30 @@ function OutboundList({ state, warehouse }: { state: WmsState; warehouse: "SYD" 
       <PageHead
         title="Outbound orders"
         subtitle="Replacement fulfilment from ERP review through allocation, preparation, SN scan and dispatch."
+        actions={
+          <form
+            className="scanner-row"
+            onSubmit={async (event) => {
+              event.preventDefault();
+              if (!importSh.trim()) return;
+              const accepted = await commit(
+                { type: "importOutbound", shNo: importSh.trim().toUpperCase() },
+                `${importSh.trim().toUpperCase()} imported as Pending Allocation; no stock frozen.`,
+              );
+              if (accepted) setImportSh("");
+            }}
+          >
+            <input
+              aria-label="SH number to import"
+              placeholder="Try SH-2607-00175722"
+              value={importSh}
+              onChange={(event) => setImportSh(event.target.value.toUpperCase())}
+            />
+            <Button className="primary" type="submit">
+              <Plus /> Import ERP order
+            </Button>
+          </form>
+        }
       />
       <div className="panel">
         <div className="toolbar">
@@ -642,7 +679,17 @@ function OutboundDetail({
     line.preparedQty === line.requiredQty &&
     (!serialRequired || line.scannedSerials.length === line.requiredQty) &&
     order.status !== "Outbound";
-  const step = order.status === "Outbound" ? 5 : line.scannedSerials.length === line.requiredQty ? 4 : line.preparedQty ? 3 : 1;
+  const canPrepare = line.allocatedQty > line.preparedQty && order.status !== "Outbound";
+  const step =
+    order.status === "Outbound"
+      ? 5
+      : line.scannedSerials.length === line.requiredQty
+        ? 4
+        : line.preparedQty
+          ? 3
+          : line.allocatedQty
+            ? 2
+            : 1;
 
   async function scanSerial(event: FormEvent) {
     event.preventDefault();
@@ -675,6 +722,22 @@ function OutboundDetail({
               }
             >
               <Truck /> Confirm dispatch
+            </Button>
+            <Button
+              disabled={!canPrepare}
+              onClick={() =>
+                commit(
+                  {
+                    type: "prepareOutbound",
+                    orderId: order.id,
+                    lineId: line.id,
+                    allocationIds: line.allocations.filter((row) => !row.preparedAt).map((row) => row.id),
+                  },
+                  `${order.shNo} physical preparation confirmed; frozen stock updated.`,
+                )
+              }
+            >
+              <PackageCheck /> Confirm prepared
             </Button>
           </>
         }
@@ -722,7 +785,7 @@ function OutboundDetail({
               </table>
             </div>
           </div>
-          {line.preparedQty < line.requiredQty && (
+          {line.allocatedQty < line.requiredQty && (
             <div className="panel">
               <div className="panel-head">
                 <h3>Eligible inventory</h3>
@@ -754,17 +817,17 @@ function OutboundDetail({
                       onClick={() =>
                         commit(
                           {
-                            type: "prepareOutbound",
+                            type: "allocateOutbound",
                             orderId: order.id,
                             lineId: line.id,
                             locationCode: row.locationCode,
-                            qty: Math.min(row.availableQty, line.requiredQty - line.preparedQty),
+                            qty: Math.min(row.availableQty, line.requiredQty - line.allocatedQty),
                           },
-                          `${Math.min(row.availableQty, line.requiredQty - line.preparedQty)} units prepared at ${row.locationCode}; physical quantity unchanged.`,
+                          `${Math.min(row.availableQty, line.requiredQty - line.allocatedQty)} units allocated at ${row.locationCode}; physical and frozen quantities unchanged.`,
                         )
                       }
                     >
-                      <PackageCheck /> Allocate & prepare
+                      <PackageCheck /> Allocate
                     </Button>
                   </div>
                 ))}
@@ -808,7 +871,7 @@ function OutboundDetail({
             </div>
             <div className="panel-body summary-list">
               <Summary label="SH No" value={order.shNo} mono />
-              <Summary label="Pickup code" value={order.pickupCode ?? "Generated at preparation"} mono />
+              <Summary label="Pickup code" value={order.pickupCode ?? "Generated when fully prepared"} mono />
               <Summary label="ERP warehouse" value={order.erpWarehouse} />
               <Summary label="Physical warehouse" value={order.warehouseCode} />
               <Summary label="Allocation" value={line.allocationLocation ?? "Not allocated"} />
@@ -1072,6 +1135,39 @@ function RepairView({
             <Summary label="Transaction" value="Return_to_Repair" />
             <Summary label="Faulty receipts recorded" value={state.faultyReceivedCount} />
           </div>
+        </div>
+      </div>
+      <div className="panel" style={{ marginTop: 16 }}>
+        <div className="panel-head">
+          <h3>Repair lifecycle queue</h3>
+          <span className="subtle">Same known SN is preserved through Repair → Repair_Good</span>
+        </div>
+        <div className="panel-body grid">
+          {(state.repairJobs ?? []).map((job) => (
+            <div className="allocation-card" key={job.id}>
+              <div className="strong mono">{job.serialNumber ?? "Unknown legacy SN"}</div>
+              <div className="subtle">{job.model} · {job.status} · {job.currentLocation}</div>
+              <Button
+                className="primary"
+                disabled={!["Received", "Pending_Repair", "In_Repair"].includes(job.status)}
+                onClick={() =>
+                  commit(
+                    {
+                      type: "completeRepair",
+                      repairJobId: job.id,
+                      targetLocationCode: "FLEX-01",
+                      outcome: "Repair_Good",
+                      remark: "Technician repair completed; returned to serviceable stock.",
+                    },
+                    `${job.serialNumber ?? job.sku} completed as Repair_Good at FLEX-01.`,
+                  )
+                }
+              >
+                <Wrench /> Complete Repair
+              </Button>
+            </div>
+          ))}
+          {!state.repairJobs?.length && <Empty label="No active repair jobs." />}
         </div>
       </div>
     </>
@@ -1816,8 +1912,17 @@ function AdminView({ state, resource }: { state: WmsState; resource: string }) {
   );
 }
 
-function LabelView({ order }: { order: OutboundOrder }) {
-  const line = order.lines[0];
+function LabelView({ order, state }: { order: OutboundOrder; state: WmsState }) {
+  const batch = state.pickupBatches?.find((row) => row.code === order.pickupCode);
+  const shNos = batch?.shNos ?? [order.shNo];
+  const lines =
+    batch?.lines ??
+    order.lines.map((line) => ({
+      sku: line.sku,
+      model: line.model,
+      erpWarehouse: line.erpWarehouse ?? order.erpWarehouse,
+      qty: line.requiredQty,
+    }));
   return (
     <div className="label-page">
       <div className="print-controls">
@@ -1833,33 +1938,23 @@ function LabelView({ order }: { order: OutboundOrder }) {
         <div>
           <section className="label-main">
             <div className="label-kicker">Service outbound · SH</div>
-            <div className="label-sh">{order.shNo}</div>
+            <div className="label-sh">{shNos.join(" · ")}</div>
             <div className="label-pickup">
               <span>Pickup</span>
               <strong>{order.pickupCode ?? "PENDING"}</strong>
             </div>
           </section>
           <section className="label-details">
-            <LabelDetail label="SKU" value={line.sku} />
-            <LabelDetail label="Model" value={line.model} />
-            <LabelDetail label="ERP Warehouse" value={order.erpWarehouse} />
-            <div className="label-detail label-qty">
-              <span>Qty</span>
-              <strong>{line.requiredQty}</strong>
-            </div>
+            {lines.map((line) => (
+              <div className="label-detail" key={`${line.sku}:${line.model}:${line.erpWarehouse}`}>
+                <span>{line.sku} · {line.model}</span>
+                <strong>{line.erpWarehouse} · Qty {line.qty}</strong>
+              </div>
+            ))}
           </section>
         </div>
         <div className="label-brand">BATCH LABEL · 1 LABEL / 1 A4 PAGE</div>
       </article>
-    </div>
-  );
-}
-
-function LabelDetail({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="label-detail">
-      <span>{label}</span>
-      <strong>{value}</strong>
     </div>
   );
 }

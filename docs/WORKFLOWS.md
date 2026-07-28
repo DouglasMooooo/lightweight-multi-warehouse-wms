@@ -1,5 +1,27 @@
 # Workflows
 
+## Replacement outbound
+
+1. Import read-only ERP Replacement Unit Information as `Pending_Allocation`.
+2. Select one or more eligible physical locations. This creates allocations only.
+3. Scan/assign required serials against those allocations.
+4. Confirm physical preparation. Exact balances increase Frozen; Physical is unchanged.
+5. When all lines are prepared, create or attach one PickupBatch and expose its A4 batch label.
+6. Confirm dispatch. Exact allocations reduce Physical and Frozen, serials become Outbound, and `outboundAt` is set.
+7. Queue ERP write-back independently. Failure creates retryable operational work and does not reverse confirmed physical dispatch.
+
+## Faulty return and repair
+
+1. Query ERP by known returned SN and receive once to Repair stock.
+2. Create a RepairReturn plus linked RepairJob; preserve the existing serial entity when present.
+3. Complete repair by choosing outcome and target physical location.
+4. For Repair_Good, decrement Repair balance, increment Repair_Good balance, set the same SN to `In_Stock`, and append repair transaction/audit records.
+5. Use Legacy / Manual Recognition only for historical Repair_Good stock whose earlier repair lifecycle is unavailable.
+
+## Shadow reconciliation
+
+Map workbook rows by semantic headers into SKU, condition, physical location, optional container and quantity. Compare with WMS balances and report match/missing/quantity/condition/location outcomes. No result writes inventory.
+
 ## Prepare and outbound
 
 Prepare validates available stock per location, creates an allocation, freezes that location's quantity, updates totals, atomically generates a pickup code if needed, and writes transaction/audit rows. Repeating prepare at another location creates another allocation.

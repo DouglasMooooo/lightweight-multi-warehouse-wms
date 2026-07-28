@@ -11,12 +11,22 @@ const condition = z.enum(["New", "Repair_Good", "Repair", "Scrap", "Material"]);
 const warehouse = z.enum(["SYD", "MEL", "BNE"]);
 const commandSchema = z.discriminatedUnion("type", [
   z.object({
-    type: z.literal("prepareOutbound"),
+    type: z.literal("importOutbound"),
+    shNo: z.string().min(1),
+  }),
+  z.object({
+    type: z.literal("allocateOutbound"),
     orderId: z.string().min(1),
     lineId: z.string().min(1),
     locationCode: z.string().min(1),
     qty: z.number().positive(),
     containerCode: z.string().optional(),
+  }),
+  z.object({
+    type: z.literal("prepareOutbound"),
+    orderId: z.string().min(1),
+    lineId: z.string().min(1),
+    allocationIds: z.array(z.string().min(1)).optional(),
   }),
   z.object({
     type: z.literal("scanOutboundSerial"),
@@ -47,6 +57,22 @@ const commandSchema = z.discriminatedUnion("type", [
     serialNumber: z.string().optional(),
   }),
   z.object({ type: z.literal("receiveFaulty"), serialNumber: z.string().min(1) }),
+  z.object({
+    type: z.literal("completeRepair"),
+    repairJobId: z.string().min(1),
+    targetLocationCode: z.string().min(1),
+    outcome: z.enum(["Repair_Good", "Scrap", "Returned_Unrepaired"]),
+    remark: z.string().min(1),
+  }),
+  z.object({
+    type: z.literal("legacyRepairGoodIn"),
+    warehouseCode: warehouse,
+    locationCode: z.string().min(1),
+    sku: z.string().min(1),
+    qty: z.number().positive(),
+    remark: z.string().min(1),
+    serialNumber: z.string().optional(),
+  }),
   z.object({
     type: z.literal("moveStock"),
     warehouseCode: warehouse,

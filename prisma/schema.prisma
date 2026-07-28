@@ -31,6 +31,8 @@ enum StockTransactionType {
   Return_to_Repair
   Transfer_Out
   Transfer_In
+  Repair_Completed
+  RepairGood_Adjustment_In
 }
 
 enum SerialStatus {
@@ -45,12 +47,47 @@ enum SerialStatus {
 enum OutboundStatus {
   Draft
   Ready
+  Imported
+  Pending_Allocation
+  Allocated
   Prepared
   Partially_Prepared
   Ready_for_Pickup
   Outbound
+  ERP_Synced
   Cancelled
   Exception
+}
+
+enum RepairStatus {
+  Received
+  Pending_Repair
+  In_Repair
+  Repair_Completed
+  Repair_Good
+  Scrap_Pending
+  Scrapped
+}
+
+enum RepairOutcome {
+  Repair_Good
+  Scrap
+  Returned_Unrepaired
+}
+
+enum RepairSource {
+  Native_Return
+  Legacy_Manual
+}
+
+enum LabelType {
+  Batch_Label
+  Unit_SN_Label
+}
+
+enum ReportingPeriodType {
+  Weekly
+  Monthly
 }
 
 enum TransferStatus {
@@ -113,6 +150,10 @@ model Warehouse {
   pickupSequence     PickupSequence?
   stocktakes         Stocktake[]
   erpMappings        ERPWarehouseMapping[]
+  pickupBatches      PickupBatch[]
+  repairJobs         RepairJob[]
+  operationalSnapshots OperationalSnapshot[]
+  repairWeeklyMetrics RepairWeeklyMetrics[]
 }
 
 model Location {
@@ -135,6 +176,8 @@ model Location {
   targetTransactions StockTransaction[]    @relation("TransactionTargetLocation")
   allocations        OutboundAllocation[]
   repairReturns      RepairReturn[]
+  repairJobsReceived RepairJob[]             @relation("RepairReceivedLocation")
+  repairJobsCurrent  RepairJob[]             @relation("RepairCurrentLocation")
   transferReceipts   TransferOrder[]        @relation("TransferDestinationLocation")
 
   @@unique([warehouseId, code])
@@ -148,7 +191,8 @@ model Product {
   itemType               ItemType
   category               String?
   serialTrackingRequired Boolean               @default(false)
-  reportCategory         String?
+  reportMachine          Boolean               @default(false)
+  reportGroup            String?
   active                 Boolean               @default(true)
   createdAt              DateTime              @default(now())
   updatedAt              DateTime              @updatedAt
@@ -159,6 +203,7 @@ model Product {
   repairReturns          RepairReturn[]
   transferLines          TransferOrderLine[]
   stocktakeLines         StocktakeLine[]
+  repairJobs             RepairJob[]
 
   @@index([model])
   @@index([itemType, active])
@@ -220,7 +265,8 @@ model StockTransaction {
   operationId        String
   reason             String?
   remark             String
-  occurredAt         DateTime             @default(now())
+  recordedAt         DateTime             @default(now())
+  effectiveAt        DateTime             @default(now())
   createdById        String
   warehouse          Warehouse            @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
   sourceLocation     Location?            @relation("TransactionSourceLocation", fields: [sourceLocationId], references: [id], onDelete: Restrict)
@@ -230,9 +276,9 @@ model StockTransaction {
   serialNumber       SerialNumber?        @relation(fields: [serialNumberId], references: [id], onDelete: Restrict)
   createdBy          User                 @relation(fields: [createdById], references: [id], onDelete: Restrict)
 
-  @@index([occurredAt])
-  @@index([warehouseId, occurredAt])
-  @@index([productId, occurredAt])
+  @@index([recordedAt])
+  @@index([warehouseId, effectiveAt])
+  @@index([productId, effectiveAt])
   @@index([businessReference])
   @@index([operationId])
 }
@@ -254,6 +300,7 @@ model SerialNumber {
   transactions          StockTransaction[]
   outboundAllocations   OutboundAllocation[]
   repairReturns         RepairReturn[]
+  repairJobs            RepairJob[]
   transferSerials       TransferSerial[]
 
   @@index([productId, status])
@@ -263,21 +310,28 @@ model SerialNumber {
 model OutboundOrder {
   id              String              @id @default(cuid())
   shNo            String              @unique
-  pickupCode      String?             @unique
+  pickupCode      String?
+  pickupBatchId   String?
   erpWarehouse    String
   warehouseId     String
   status          OutboundStatus
   erpSyncStatus   ERPStatus           @default(Pending)
   customerLabel   String?
+  preparedAt      DateTime?
+  readyForPickupAt DateTime?
+  outboundAt      DateTime?
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
   warehouse       Warehouse           @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  pickupBatch     PickupBatch?        @relation(fields: [pickupBatchId], references: [id], onDelete: SetNull)
   lines           OutboundOrderLine[]
   erpDocuments    ERPDocument[]
   syncJobs        ERPSyncJob[]
 
   @@index([warehouseId, status])
   @@index([createdAt])
+  @@index([pickupCode])
+  @@index([outboundAt])
 }
 
 model OutboundOrderLine {
@@ -286,6 +340,7 @@ model OutboundOrderLine {
   productId         String
   requiredQty       Decimal              @db.Decimal(18, 3)
   requiredCondition StockCondition
+  erpWarehouse      String
   allocatedQty      Decimal              @default(0) @db.Decimal(18, 3)
   preparedQty       Decimal              @default(0) @db.Decimal(18, 3)
   dispatchedQty     Decimal              @default(0) @db.Decimal(18, 3)
@@ -303,6 +358,7 @@ model OutboundAllocation {
   containerId         String?
   serialNumberId      String?
   quantity            Decimal           @db.Decimal(18, 3)
+  allocatedAt         DateTime           @default(now())
   preparedAt          DateTime?
   dispatchedAt        DateTime?
   createdAt           DateTime          @default(now())
@@ -326,14 +382,58 @@ model RepairReturn {
   manualReview     Boolean       @default(false)
   active           Boolean       @default(true)
   completedAt      DateTime?
+  repairJobId      String?       @unique
   receivedAt       DateTime      @default(now())
   remark           String
   serialNumber     SerialNumber  @relation(fields: [serialNumberId], references: [id], onDelete: Restrict)
   product          Product       @relation(fields: [productId], references: [id], onDelete: Restrict)
   location         Location      @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  repairJob        RepairJob?    @relation(fields: [repairJobId], references: [id], onDelete: SetNull)
 
   @@index([relatedShNo])
   @@index([receivedAt])
+}
+
+model RepairJob {
+  id                   String         @id @default(cuid())
+  serialNumberId       String?
+  warehouseId          String
+  productId            String
+  receivedLocationId   String
+  currentLocationId    String
+  originalShNo         String?
+  status               RepairStatus
+  outcome              RepairOutcome?
+  source               RepairSource   @default(Native_Return)
+  receivedAt           DateTime       @default(now())
+  repairCompletedAt    DateTime?
+  returnedToStockAt    DateTime?
+  remark               String
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+  serialNumber         SerialNumber?  @relation(fields: [serialNumberId], references: [id], onDelete: Restrict)
+  warehouse            Warehouse      @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  product              Product        @relation(fields: [productId], references: [id], onDelete: Restrict)
+  receivedLocation     Location       @relation("RepairReceivedLocation", fields: [receivedLocationId], references: [id], onDelete: Restrict)
+  currentLocation      Location       @relation("RepairCurrentLocation", fields: [currentLocationId], references: [id], onDelete: Restrict)
+  repairReturn         RepairReturn?
+
+  @@index([warehouseId, status])
+  @@index([serialNumberId])
+  @@index([originalShNo])
+}
+
+model PickupBatch {
+  id          String          @id @default(cuid())
+  code        String          @unique
+  warehouseId String
+  labelType   LabelType       @default(Batch_Label)
+  createdAt   DateTime        @default(now())
+  readyAt     DateTime?
+  warehouse   Warehouse       @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  orders      OutboundOrder[]
+
+  @@index([warehouseId, createdAt])
 }
 
 model PickupSequence {
@@ -397,6 +497,9 @@ model TransferOrder {
   status                TransferStatus
   erpSyncStatus         ERPStatus           @default(Pending)
   createdAt             DateTime            @default(now())
+  preparedAt            DateTime?
+  dispatchedAt          DateTime?
+  receivedAt            DateTime?
   updatedAt             DateTime            @updatedAt
   sourceWarehouse       Warehouse           @relation("TransferSource", fields: [sourceWarehouseId], references: [id], onDelete: Restrict)
   destinationWarehouse  Warehouse           @relation("TransferDestination", fields: [destinationWarehouseId], references: [id], onDelete: Restrict)
@@ -406,6 +509,42 @@ model TransferOrder {
 
   @@index([sourceWarehouseId, status])
   @@index([destinationWarehouseId, status])
+}
+
+model OperationalSnapshot {
+  id          String              @id @default(cuid())
+  periodType  ReportingPeriodType
+  periodStart DateTime
+  periodEnd   DateTime
+  warehouseId String
+  metrics     Json
+  confirmedAt DateTime
+  confirmedBy String
+  createdAt   DateTime            @default(now())
+  warehouse   Warehouse           @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+
+  @@unique([periodType, periodStart, periodEnd, warehouseId])
+  @@index([warehouseId, periodEnd])
+}
+
+model RepairWeeklyMetrics {
+  id                String    @id @default(cuid())
+  weekStart         DateTime
+  warehouseId       String
+  repairCompleted   Int?
+  repairScrap       Int?
+  scrapOutbound     Int?
+  pendingScrap      Int?
+  repairGoodInbound Int?
+  pendingRepair     Int?
+  repairInventory   Int?
+  remark            String?
+  confirmedAt       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  warehouse         Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+
+  @@unique([weekStart, warehouseId])
 }
 
 model TransferOrderLine {

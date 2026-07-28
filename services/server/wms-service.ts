@@ -145,6 +145,8 @@ export class WmsApplicationService {
       exceptions,
       sequences,
       faultyReceivedCount,
+      repairJobs,
+      pickupBatches,
     ] = await Promise.all([
       this.prisma.warehouse.findMany({ orderBy: { code: "asc" } }),
       this.prisma.location.findMany({ include: { warehouse: true }, orderBy: { code: "asc" } }),
@@ -191,13 +193,25 @@ export class WmsApplicationService {
       }),
       this.prisma.stockTransaction.findMany({
         include: { warehouse: true, sourceLocation: true, targetLocation: true, product: true, serialNumber: true },
-        orderBy: { occurredAt: "desc" },
+        orderBy: { effectiveAt: "desc" },
         take: 500,
       }),
       this.prisma.auditLog.findMany({ include: { user: true }, orderBy: { createdAt: "desc" }, take: 500 }),
       this.prisma.exception.findMany({ orderBy: { createdAt: "desc" }, take: 500 }),
       this.prisma.pickupSequence.findMany({ include: { warehouse: true } }),
       this.prisma.repairReturn.count(),
+      this.prisma.repairJob.findMany({
+        include: { serialNumber: true, product: true, warehouse: true, currentLocation: true },
+        orderBy: { receivedAt: "desc" },
+      }),
+      this.prisma.pickupBatch.findMany({
+        include: {
+          orders: {
+            include: { lines: { include: { product: true } } },
+          },
+        },
+        orderBy: { createdAt: "desc" },
+      }),
     ]);
 
     const pickupSequence = { SYD: 0, MEL: 0, BNE: 0 } as Record<WarehouseCode, number>;
@@ -272,6 +286,8 @@ export class WmsApplicationService {
         itemType: row.itemType,
         category: row.category ?? "",
         serialTrackingRequired: row.serialTrackingRequired,
+        reportMachine: row.reportMachine,
+        reportGroup: row.reportGroup ?? undefined,
         active: row.active,
       })),
       inventory: balances.map((row) => ({
@@ -308,6 +324,9 @@ export class WmsApplicationService {
         warehouseCode: order.warehouse.code as WarehouseCode,
         status: order.status,
         createdAt: order.createdAt.toISOString(),
+        preparedAt: order.preparedAt?.toISOString(),
+        readyForPickupAt: order.readyForPickupAt?.toISOString(),
+        outboundAt: order.outboundAt?.toISOString(),
         customerLabel: order.customerLabel ?? undefined,
         erpSyncStatus: order.erpSyncStatus,
         lines: order.lines.map((line) => {
@@ -326,6 +345,7 @@ export class WmsApplicationService {
             model: line.product.model,
             requiredQty: number(line.requiredQty),
             requiredCondition: line.requiredCondition,
+            erpWarehouse: line.erpWarehouse,
             allocatedQty: number(line.allocatedQty),
             preparedQty: number(line.preparedQty),
             dispatchedQty: number(line.dispatchedQty),
@@ -360,7 +380,9 @@ export class WmsApplicationService {
       ),
       transactions: transactions.map((row) => ({
         id: row.id,
-        at: row.occurredAt.toISOString(),
+        at: row.effectiveAt.toISOString(),
+        recordedAt: row.recordedAt.toISOString(),
+        effectiveAt: row.effectiveAt.toISOString(),
         type: row.transactionType,
         warehouseCode: row.warehouse.code as WarehouseCode,
         sku: row.product?.sku,
@@ -397,6 +419,62 @@ export class WmsApplicationService {
       ],
       pickupSequence,
       faultyReceivedCount,
+      repairJobs: repairJobs.map((job) => ({
+        id: job.id,
+        serialNumber: job.serialNumber?.serialNumber,
+        sku: job.product.sku,
+        model: job.product.model,
+        warehouseCode: job.warehouse.code as WarehouseCode,
+        currentLocation: job.currentLocation.code,
+        originalShNo: job.originalShNo ?? undefined,
+        status: job.status,
+        outcome: job.outcome ?? undefined,
+        source: job.source,
+        receivedAt: job.receivedAt.toISOString(),
+        repairCompletedAt: job.repairCompletedAt?.toISOString(),
+        returnedToStockAt: job.returnedToStockAt?.toISOString(),
+        remark: job.remark,
+      })),
+      pickupBatches: pickupBatches.map((batch) => {
+        const grouped = new Map<string, { sku: string; model: string; erpWarehouse: string; qty: number }>();
+        for (const order of batch.orders) {
+          for (const line of order.lines) {
+            const key = JSON.stringify([line.product.sku, line.product.model, line.erpWarehouse]);
+            const row = grouped.get(key);
+            const qty = number(line.requiredQty);
+            if (row) row.qty += qty;
+            else
+              grouped.set(key, {
+                sku: line.product.sku,
+                model: line.product.model,
+                erpWarehouse: line.erpWarehouse,
+                qty,
+              });
+          }
+        }
+        return {
+          id: batch.id,
+          code: batch.code,
+          labelType: batch.labelType,
+          shNos: [...new Set(batch.orders.map((order) => order.shNo))],
+          lines: [...grouped.values()],
+          readyAt: batch.readyAt?.toISOString(),
+        };
+      }),
+      dashboardTasks: {
+        needsAllocation: orders.filter((row) => ["Imported", "Pending_Allocation"].includes(row.status)).length,
+        prepared: orders.filter((row) => ["Prepared", "Partially_Prepared"].includes(row.status)).length,
+        readyForPickup: orders.filter((row) => row.status === "Ready_for_Pickup").length,
+        outboundToday: orders.filter(
+          (row) => row.outboundAt && row.outboundAt.toDateString() === new Date().toDateString(),
+        ).length,
+        faultyReturns: faultyReceivedCount,
+        repairQueue: repairJobs.filter((row) => ["Received", "Pending_Repair", "In_Repair"].includes(row.status)).length,
+        repairCompletedAwaitingPutaway: repairJobs.filter((row) => row.status === "Repair_Completed").length,
+        transfersInTransit: transfers.filter((row) => ["Dispatched", "In_Transit", "Partially_Received"].includes(row.status)).length,
+        reconciliationIssues: diagnosticExceptions.length,
+        erpSyncFailures: orders.filter((row) => row.erpSyncStatus === "Failed").length,
+      },
     };
   }
 
@@ -408,6 +486,12 @@ export class WmsApplicationService {
       return this.snapshot();
     }
     switch (command.type) {
+      case "importOutbound":
+        await this.importOutbound(command.shNo);
+        break;
+      case "allocateOutbound":
+        await this.allocateOutbound(command);
+        break;
       case "prepareOutbound":
         await this.prepareOutbound(command);
         break;
@@ -425,6 +509,12 @@ export class WmsApplicationService {
         break;
       case "receiveFaulty":
         await this.receiveFaulty(command.serialNumber);
+        break;
+      case "completeRepair":
+        await this.completeRepair(command);
+        break;
+      case "legacyRepairGoodIn":
+        await this.legacyRepairGoodIn(command);
         break;
       case "moveStock":
         await this.move(command);
@@ -454,7 +544,68 @@ export class WmsApplicationService {
     throw new DomainError("ERP record not found. A Manual Review exception was created.");
   }
 
-  private async prepareOutbound(input: Extract<WmsCommand, { type: "prepareOutbound" }>) {
+  private async importOutbound(shNo: string) {
+    const erpOrder = await this.erp.getOutboundOrder(shNo.trim().toUpperCase());
+    if (!erpOrder) throw new DomainError("ERP_LOOKUP_FAILED: Replacement Unit Information was not found.");
+    await serializable(this.prisma, async (tx) => {
+      const who = await actor(tx);
+      const duplicate = await tx.outboundOrder.findUnique({ where: { shNo: erpOrder.shNo } });
+      if (duplicate) throw new DomainError("This SH number already exists.");
+      const warehouse = await requireWarehouse(tx, erpOrder.physicalWarehouseCode);
+      const mappedLines = [];
+      for (const erpLine of erpOrder.replacementUnitInformation) {
+        const product = await requireProduct(tx, erpLine.sku);
+        const mapping = await tx.eRPWarehouseMapping.findUnique({
+          where: {
+            warehouseId_erpWarehouse: {
+              warehouseId: warehouse.id,
+              erpWarehouse: erpLine.erpWarehouse,
+            },
+          },
+        });
+        if (!mapping) throw new DomainError(`ERP warehouse mapping is missing for ${erpLine.erpWarehouse}.`);
+        mappedLines.push({ erpLine, product, condition: mapping.condition });
+      }
+      if (!mappedLines.length) throw new DomainError("ERP_LOOKUP_FAILED: Replacement Unit Information has no lines.");
+      const order = await tx.outboundOrder.create({
+        data: {
+          shNo: erpOrder.shNo,
+          erpWarehouse:
+            new Set(mappedLines.map((line) => line.erpLine.erpWarehouse)).size === 1
+              ? mappedLines[0].erpLine.erpWarehouse
+              : "Mixed ERP warehouses",
+          warehouseId: warehouse.id,
+          status: "Pending_Allocation",
+          customerLabel: erpOrder.customerLabel,
+          lines: {
+            create: mappedLines.map(({ erpLine, product, condition }) => ({
+              productId: product.id,
+              requiredQty: erpLine.quantity,
+              requiredCondition: condition,
+              erpWarehouse: erpLine.erpWarehouse,
+            })),
+          },
+        },
+      });
+      await tx.eRPDocument.create({
+        data: {
+          documentType: "OutboundOrder",
+          externalNumber: erpOrder.shNo,
+          payload: erpOrder as unknown as Prisma.InputJsonValue,
+          outboundOrderId: order.id,
+        },
+      });
+      await audit(tx, who, {
+        operation: "Imported replacement outbound",
+        entityType: "OutboundOrder",
+        entityId: order.id,
+        businessReference: order.shNo,
+        remark: "Read-only Replacement Unit Information imported as Pending Allocation; no balance or frozen quantity changed.",
+      });
+    });
+  }
+
+  private async allocateOutbound(input: Extract<WmsCommand, { type: "allocateOutbound" }>) {
     await serializable(this.prisma, async (tx) => {
       const who = await actor(tx);
       const line = await tx.outboundOrderLine.findUnique({
@@ -479,53 +630,153 @@ export class WmsApplicationService {
       });
       const inventory = new InventoryRepository(tx);
       const balance = await inventory.getOrCreateBalance(key);
-      validatePreparation(
-        number(line.requiredQty),
-        number(line.preparedQty),
-        number(balance.physicalQty.minus(balance.frozenQty)),
-        input.qty,
-      );
-      await inventory.applyDelta(key, { frozenDelta: input.qty });
+      if (input.qty <= 0 || line.allocatedQty.plus(input.qty).greaterThan(line.requiredQty))
+        throw new DomainError("Allocation quantity exceeds the requested quantity.");
+      const otherReserved = await tx.outboundAllocation.aggregate({
+        where: {
+          outboundOrderLine: {
+            outboundOrder: { warehouseId: line.outboundOrder.warehouseId, status: { notIn: ["Outbound", "ERP_Synced", "Cancelled"] } },
+            productId: line.productId,
+            requiredCondition: line.requiredCondition,
+          },
+          locationId: location.id,
+          containerId: container?.id ?? null,
+          preparedAt: null,
+          dispatchedAt: null,
+        },
+        _sum: { quantity: true },
+      });
+      const allocatable = balance.physicalQty
+        .minus(balance.frozenQty)
+        .minus(otherReserved._sum.quantity ?? 0);
+      if (decimal(input.qty).greaterThan(allocatable))
+        throw new DomainError("INSUFFICIENT_AVAILABLE_STOCK");
       await tx.outboundAllocation.create({
         data: {
           outboundOrderLineId: line.id,
           locationId: location.id,
           containerId: container?.id,
           quantity: input.qty,
-          preparedAt: new Date(),
         },
       });
-      const preparedQty = line.preparedQty.plus(input.qty);
+      const allocatedQty = line.allocatedQty.plus(input.qty);
       await tx.outboundOrderLine.update({
         where: { id: line.id },
-        data: { allocatedQty: preparedQty, preparedQty },
+        data: { allocatedQty },
       });
+      const allLines = await tx.outboundOrderLine.findMany({ where: { outboundOrderId: input.orderId } });
+      const complete = allLines.every((row) =>
+        row.id === line.id ? allocatedQty.equals(row.requiredQty) : row.allocatedQty.equals(row.requiredQty),
+      );
+      await tx.outboundOrder.update({
+        where: { id: input.orderId },
+        data: { status: complete ? "Allocated" : "Pending_Allocation" },
+      });
+      await audit(tx, who, {
+        operation: "Allocated outbound",
+        entityType: "OutboundOrder",
+        entityId: input.orderId,
+        businessReference: line.outboundOrder.shNo,
+        remark: `Allocated ${input.qty} at ${location.code}; physical and frozen quantities unchanged.`,
+      });
+    });
+  }
+
+  private async prepareOutbound(input: Extract<WmsCommand, { type: "prepareOutbound" }>) {
+    await serializable(this.prisma, async (tx) => {
+      const who = await actor(tx);
+      const line = await tx.outboundOrderLine.findUnique({
+        where: { id: input.lineId },
+        include: {
+          product: true,
+          outboundOrder: { include: { warehouse: true } },
+          allocations: {
+            where: { preparedAt: null, dispatchedAt: null },
+            include: { location: true },
+          },
+        },
+      });
+      if (!line || line.outboundOrderId !== input.orderId) throw new DomainError("Outbound order line not found.");
+      const selected = input.allocationIds?.length
+        ? line.allocations.filter((row) => input.allocationIds!.includes(row.id))
+        : line.allocations;
+      if (!selected.length || (input.allocationIds && selected.length !== input.allocationIds.length))
+        throw new DomainError("ORDER_NOT_ALLOCATED");
+      const inventory = new InventoryRepository(tx);
+      const at = new Date();
+      let preparedDelta = decimal(0);
+      for (const allocation of selected) {
+        const key = balanceKey({
+          warehouseId: line.outboundOrder.warehouseId,
+          locationId: allocation.locationId,
+          containerId: allocation.containerId,
+          productId: line.productId,
+          itemType: line.product.itemType,
+          condition: line.requiredCondition,
+        });
+        const balance = await inventory.getOrCreateBalance(key);
+        validatePreparation(
+          number(line.requiredQty),
+          number(line.preparedQty.plus(preparedDelta)),
+          number(balance.physicalQty.minus(balance.frozenQty)),
+          number(allocation.quantity),
+        );
+        await inventory.applyDelta(key, { frozenDelta: allocation.quantity });
+        await tx.outboundAllocation.update({ where: { id: allocation.id }, data: { preparedAt: at } });
+        if (allocation.serialNumberId)
+          await tx.serialNumber.update({
+            where: { id: allocation.serialNumberId },
+            data: { status: "Prepared" },
+          });
+        preparedDelta = preparedDelta.plus(allocation.quantity);
+        await tx.stockTransaction.create({
+          data: {
+            transactionType: "Prepared",
+            warehouseId: line.outboundOrder.warehouseId,
+            sourceLocationId: allocation.locationId,
+            containerId: allocation.containerId,
+            productId: line.productId,
+            itemType: line.product.itemType,
+            condition: line.requiredCondition,
+            quantity: allocation.quantity,
+            frozenDelta: allocation.quantity,
+            businessReference: line.outboundOrder.shNo,
+            operationId: operationId(),
+            effectiveAt: at,
+            remark: "Physical preparation confirmed; frozen increased and physical unchanged.",
+            createdById: who.id,
+          },
+        });
+      }
+      const preparedQty = line.preparedQty.plus(preparedDelta);
+      await tx.outboundOrderLine.update({ where: { id: line.id }, data: { preparedQty } });
       const allLines = await tx.outboundOrderLine.findMany({ where: { outboundOrderId: input.orderId } });
       const complete = allLines.every((row) =>
         row.id === line.id ? preparedQty.equals(row.requiredQty) : row.preparedQty.equals(row.requiredQty),
       );
-      const code =
-        line.outboundOrder.pickupCode ?? (await pickupCode(tx, line.outboundOrder.warehouse, who));
+      let code = line.outboundOrder.pickupCode;
+      let batchId = line.outboundOrder.pickupBatchId;
+      if (complete && !batchId) {
+        code = code ?? (await pickupCode(tx, line.outboundOrder.warehouse, who));
+        const batch = await tx.pickupBatch.upsert({
+          where: { code },
+          update: { readyAt: at },
+          create: {
+            code,
+            warehouseId: line.outboundOrder.warehouseId,
+            readyAt: at,
+          },
+        });
+        batchId = batch.id;
+      }
       await tx.outboundOrder.update({
         where: { id: input.orderId },
-        data: { pickupCode: code, status: complete ? "Ready_for_Pickup" : "Partially_Prepared" },
-      });
-      const op = operationId();
-      await tx.stockTransaction.create({
         data: {
-          transactionType: "Prepared",
-          warehouseId: line.outboundOrder.warehouseId,
-          sourceLocationId: location.id,
-          containerId: container?.id,
-          productId: line.productId,
-          itemType: line.product.itemType,
-          condition: line.requiredCondition,
-          quantity: input.qty,
-          frozenDelta: input.qty,
-          businessReference: line.outboundOrder.shNo,
-          operationId: op,
-          remark: "Prepared reservation; physical quantity unchanged.",
-          createdById: who.id,
+          pickupCode: code,
+          pickupBatchId: batchId,
+          status: complete ? "Ready_for_Pickup" : "Prepared",
+          preparedAt: line.outboundOrder.preparedAt ?? at,
+          readyForPickupAt: complete ? at : null,
         },
       });
       await audit(tx, who, {
@@ -533,7 +784,7 @@ export class WmsApplicationService {
         entityType: "OutboundOrder",
         entityId: input.orderId,
         businessReference: line.outboundOrder.shNo,
-        remark: `Reserved ${input.qty} at ${location.code}; physical quantity unchanged.`,
+        remark: `Confirmed physical preparation of ${number(preparedDelta)} allocated units; physical quantity unchanged.`,
       });
     });
   }
@@ -578,7 +829,7 @@ export class WmsApplicationService {
       const aggregate = line.allocations.find(
         (row) => row.locationId === serial.currentLocationId && !row.serialNumberId && row.quantity.greaterThan(0),
       );
-      if (!aggregate) throw new DomainError("All prepared units at this location already have serial numbers.");
+      if (!aggregate) throw new DomainError("All allocated units at this location already have serial numbers.");
       if (aggregate.quantity.equals(1)) await tx.outboundAllocation.delete({ where: { id: aggregate.id } });
       else
         await tx.outboundAllocation.update({
@@ -592,16 +843,17 @@ export class WmsApplicationService {
           containerId: aggregate.containerId,
           serialNumberId: serial.id,
           quantity: 1,
-          preparedAt: aggregate.preparedAt ?? new Date(),
+          preparedAt: aggregate.preparedAt,
         },
       });
-      await tx.serialNumber.update({ where: { id: serial.id }, data: { status: "Prepared" } });
+      if (aggregate.preparedAt)
+        await tx.serialNumber.update({ where: { id: serial.id }, data: { status: "Prepared" } });
       await audit(tx, who, {
         operation: "Allocated outbound serial",
         entityType: "SerialNumber",
         entityId: serial.id,
         businessReference: line.outboundOrder.shNo,
-        remark: `${serial.serialNumber} validated for SKU, condition, warehouse, location and active allocation.`,
+        remark: `${serial.serialNumber} validated for SKU, condition, warehouse and allocated physical location.`,
       });
     });
   }
@@ -624,6 +876,7 @@ export class WmsApplicationService {
       if (!order) throw new DomainError("Outbound order not found.");
       const inventory = new InventoryRepository(tx);
       const op = operationId();
+      const outboundAt = new Date();
       for (const line of order.lines) {
         if (!line.preparedQty.equals(line.requiredQty))
           throw new DomainError("All requested stock must be prepared before dispatch.");
@@ -658,7 +911,7 @@ export class WmsApplicationService {
           }
           await tx.outboundAllocation.update({
             where: { id: allocation.id },
-            data: { dispatchedAt: new Date() },
+            data: { dispatchedAt: outboundAt },
           });
           await tx.stockTransaction.create({
             data: {
@@ -675,6 +928,7 @@ export class WmsApplicationService {
               frozenDelta: allocation.quantity.negated(),
               businessReference: order.shNo,
               operationId: op,
+              effectiveAt: outboundAt,
               remark: "Confirmed physical dispatch; ERP write-back queued.",
               createdById: who.id,
             },
@@ -685,7 +939,10 @@ export class WmsApplicationService {
           data: { dispatchedQty: line.requiredQty },
         });
       }
-      await tx.outboundOrder.update({ where: { id: order.id }, data: { status: "Outbound", erpSyncStatus: "Pending" } });
+      await tx.outboundOrder.update({
+        where: { id: order.id },
+        data: { status: "Outbound", erpSyncStatus: "Pending", outboundAt },
+      });
       await tx.eRPSyncJob.create({
         data: {
           operationType: "Outbound",
@@ -841,6 +1098,19 @@ export class WmsApplicationService {
         condition: "Repair",
       });
       await inventory.applyDelta(key, { physicalDelta: 1 });
+      const repairJob = await tx.repairJob.create({
+        data: {
+          serialNumberId: serial.id,
+          warehouseId: warehouse.id,
+          productId: product.id,
+          receivedLocationId: location.id,
+          currentLocationId: location.id,
+          originalShNo: erp.relatedShNo,
+          status: "Pending_Repair",
+          source: "Native_Return",
+          remark: "ERP-matched faulty unit received to REPAIR-01.",
+        },
+      });
       await tx.repairReturn.create({
         data: {
           serialNumberId: serial.id,
@@ -849,6 +1119,7 @@ export class WmsApplicationService {
           relatedShNo: erp.relatedShNo,
           erpMatched: true,
           active: true,
+          repairJobId: repairJob.id,
           remark: "ERP-matched faulty unit received to REPAIR-01.",
         },
       });
@@ -872,9 +1143,162 @@ export class WmsApplicationService {
       await audit(tx, who, {
         operation: "Received faulty serial",
         entityType: "RepairReturn",
-        entityId: serial.id,
+        entityId: repairJob.id,
         businessReference: erp.relatedShNo,
         remark: `${normalized} received once into SYD/REPAIR-01.`,
+      });
+    });
+  }
+
+  private async completeRepair(input: Extract<WmsCommand, { type: "completeRepair" }>) {
+    await serializable(this.prisma, async (tx) => {
+      const who = await actor(tx);
+      const job = await tx.repairJob.findUnique({
+        where: { id: input.repairJobId },
+        include: { product: true, serialNumber: true, warehouse: true, repairReturn: true },
+      });
+      if (!job || !["Received", "Pending_Repair", "In_Repair"].includes(job.status))
+        throw new DomainError("Repair job is not eligible for completion.");
+      const target = await requireLocation(tx, job.warehouseId, input.targetLocationCode);
+      const targetCondition =
+        input.outcome === "Repair_Good" ? "Repair_Good" : input.outcome === "Scrap" ? "Scrap" : "Repair";
+      const targetStatus =
+        input.outcome === "Repair_Good" ? "Repair_Good" : input.outcome === "Scrap" ? "Scrapped" : "Repair_Completed";
+      const serialStatus = input.outcome === "Scrap" ? "Scrapped" : "In_Stock";
+      const inventory = new InventoryRepository(tx);
+      const sourceKey = balanceKey({
+        warehouseId: job.warehouseId,
+        locationId: job.currentLocationId,
+        productId: job.productId,
+        itemType: job.product.itemType,
+        condition: "Repair",
+      });
+      const source = await inventory.getOrCreateBalance(sourceKey);
+      if (source.physicalQty.lessThan(1)) throw new DomainError("Repair inventory is inconsistent.");
+      const targetKey = balanceKey({
+        warehouseId: job.warehouseId,
+        locationId: target.id,
+        productId: job.productId,
+        itemType: job.product.itemType,
+        condition: targetCondition,
+      });
+      await inventory.applyDelta(sourceKey, { physicalDelta: -1 });
+      await inventory.applyDelta(targetKey, { physicalDelta: 1 });
+      const at = new Date();
+      if (job.serialNumberId) {
+        await tx.serialNumber.update({
+          where: { id: job.serialNumberId },
+          data: {
+            currentWarehouseId: job.warehouseId,
+            currentLocationId: target.id,
+            condition: targetCondition,
+            status: serialStatus,
+          },
+        });
+      }
+      await tx.repairJob.update({
+        where: { id: job.id },
+        data: {
+          currentLocationId: target.id,
+          status: targetStatus,
+          outcome: input.outcome,
+          repairCompletedAt: at,
+          returnedToStockAt: at,
+          remark: input.remark,
+        },
+      });
+      if (job.repairReturn)
+        await tx.repairReturn.update({
+          where: { id: job.repairReturn.id },
+          data: { active: false, completedAt: at },
+        });
+      await tx.stockTransaction.create({
+        data: {
+          transactionType: "Repair_Completed",
+          warehouseId: job.warehouseId,
+          sourceLocationId: job.currentLocationId,
+          targetLocationId: target.id,
+          productId: job.productId,
+          serialNumberId: job.serialNumberId,
+          itemType: job.product.itemType,
+          condition: targetCondition,
+          quantity: 1,
+          physicalDelta: 0,
+          businessReference: job.originalShNo,
+          operationId: operationId(),
+          effectiveAt: at,
+          reason: input.outcome,
+          remark: input.remark,
+          createdById: who.id,
+        },
+      });
+      await audit(tx, who, {
+        operation: "Completed repair",
+        entityType: "RepairJob",
+        entityId: job.id,
+        businessReference: job.originalShNo ?? undefined,
+        remark: job.serialNumber
+          ? `${job.serialNumber.serialNumber} preserved and reclassified to ${targetCondition} at ${target.code}.`
+          : `Legacy quantity reclassified to ${targetCondition} at ${target.code}; traceability warning retained.`,
+      });
+    });
+  }
+
+  private async legacyRepairGoodIn(input: Extract<WmsCommand, { type: "legacyRepairGoodIn" }>) {
+    await serializable(this.prisma, async (tx) => {
+      const who = await actor(tx);
+      const warehouse = await requireWarehouse(tx, input.warehouseCode);
+      const location = await requireLocation(tx, warehouse.id, input.locationCode);
+      const product = await requireProduct(tx, input.sku);
+      if (product.serialTrackingRequired && input.serialNumber && input.qty !== 1)
+        throw new DomainError("A known serial can recognise exactly one legacy unit.");
+      let serialId: string | undefined;
+      if (input.serialNumber) {
+        const normalized = input.serialNumber.trim().toUpperCase();
+        const serial = await tx.serialNumber.create({
+          data: {
+            serialNumber: normalized,
+            productId: product.id,
+            currentWarehouseId: warehouse.id,
+            currentLocationId: location.id,
+            condition: "Repair_Good",
+            status: "In_Stock",
+            sourceDocument: "Legacy / Manual Recognition",
+          },
+        });
+        serialId = serial.id;
+      }
+      const inventory = new InventoryRepository(tx);
+      const key = balanceKey({
+        warehouseId: warehouse.id,
+        locationId: location.id,
+        productId: product.id,
+        itemType: product.itemType,
+        condition: "Repair_Good",
+      });
+      await inventory.applyDelta(key, { physicalDelta: input.qty });
+      await tx.stockTransaction.create({
+        data: {
+          transactionType: "RepairGood_Adjustment_In",
+          warehouseId: warehouse.id,
+          targetLocationId: location.id,
+          productId: product.id,
+          serialNumberId: serialId,
+          itemType: product.itemType,
+          condition: "Repair_Good",
+          quantity: input.qty,
+          physicalDelta: input.qty,
+          operationId: operationId(),
+          reason: "Legacy / Manual Recognition",
+          remark: input.remark,
+          createdById: who.id,
+        },
+      });
+      await audit(tx, who, {
+        operation: "Recognised legacy Repair_Good",
+        entityType: "InventoryBalance",
+        entityId: `${warehouse.id}:${location.id}:${product.id}`,
+        remark: `${input.qty} recognised from Legacy / Manual source; no fabricated RepairJob was created.`,
       });
     });
   }
@@ -968,6 +1392,7 @@ export class WmsApplicationService {
       if (transfer.sourceWarehouseId === transfer.destinationWarehouseId)
         throw new DomainError("Transfer source and destination warehouses must differ.");
       const inventory = new InventoryRepository(tx);
+      const dispatchedAt = new Date();
       const op = operationId();
       for (const line of transfer.lines) {
         const sourceLocationId = line.serials[0]?.serialNumber.currentLocationId;
@@ -999,7 +1424,7 @@ export class WmsApplicationService {
             where: { id: link.serialNumberId },
             data: { status: "In_Transit", currentLocationId: null },
           });
-          await tx.transferSerial.update({ where: { id: link.id }, data: { dispatchedAt: new Date() } });
+          await tx.transferSerial.update({ where: { id: link.id }, data: { dispatchedAt } });
         }
         await tx.stockTransaction.create({
           data: {
@@ -1019,7 +1444,10 @@ export class WmsApplicationService {
           },
         });
       }
-      await tx.transferOrder.update({ where: { id: transfer.id }, data: { status: "In_Transit" } });
+      await tx.transferOrder.update({
+        where: { id: transfer.id },
+        data: { status: "In_Transit", dispatchedAt },
+      });
       await audit(tx, who, {
         operation: "Transfer Out",
         entityType: "TransferOrder",
@@ -1044,6 +1472,7 @@ export class WmsApplicationService {
       if (!transfer || transfer.status !== "In_Transit") throw new DomainError("Transfer is not In Transit.");
       const destination = await requireLocation(tx, transfer.destinationWarehouseId, destinationCode);
       const inventory = new InventoryRepository(tx);
+      const receivedAt = new Date();
       const op = operationId();
       for (const line of transfer.lines) {
         const transaction = await tx.stockTransaction.findFirst({
@@ -1075,7 +1504,7 @@ export class WmsApplicationService {
               currentLocationId: destination.id,
             },
           });
-          await tx.transferSerial.update({ where: { id: link.id }, data: { receivedAt: new Date() } });
+          await tx.transferSerial.update({ where: { id: link.id }, data: { receivedAt } });
         }
         await tx.transferOrderLine.update({ where: { id: line.id }, data: { receivedQty: line.quantity } });
         await tx.stockTransaction.create({
@@ -1098,7 +1527,7 @@ export class WmsApplicationService {
       }
       await tx.transferOrder.update({
         where: { id: transfer.id },
-        data: { status: "Received", destinationLocationId: destination.id },
+        data: { status: "Received", destinationLocationId: destination.id, receivedAt },
       });
       await audit(tx, who, {
         operation: "Transfer In",

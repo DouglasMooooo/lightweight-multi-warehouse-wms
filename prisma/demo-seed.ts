@@ -11,9 +11,13 @@ export async function seedDemo(prisma: PrismaClient) {
     prisma.transferOrderLine.deleteMany(),
     prisma.transferOrder.deleteMany(),
     prisma.repairReturn.deleteMany(),
+    prisma.repairJob.deleteMany(),
     prisma.outboundAllocation.deleteMany(),
     prisma.outboundOrderLine.deleteMany(),
     prisma.outboundOrder.deleteMany(),
+    prisma.pickupBatch.deleteMany(),
+    prisma.operationalSnapshot.deleteMany(),
+    prisma.repairWeeklyMetrics.deleteMany(),
     prisma.serialNumber.deleteMany(),
     prisma.inventoryBalance.deleteMany(),
     prisma.pickupSequence.deleteMany(),
@@ -89,6 +93,8 @@ export async function seedDemo(prisma: PrismaClient) {
       ["97-223-00107-00", "EQ4800-S", "Product", "Battery", true],
       ["97-223-00108-00", "EQ4800-M", "Product", "Battery", true],
       ["97-229-00012-00", "CQ6-M", "Product", "Battery", true],
+      ["97-229-00020-00", "CQ6-M", "Product", "Battery", true],
+      ["97-229-00021-00", "CQ6-S", "Product", "Battery", true],
       ["10-105-00346-00", "Battery service cable", "Material", "Cable/Connector", false],
       ["20-012-10219-08", "PCBA H1-G2 power board", "Material", "PCBA", false],
     ].map(([sku, model, itemType, category, serialTrackingRequired]) =>
@@ -99,6 +105,8 @@ export async function seedDemo(prisma: PrismaClient) {
           itemType: itemType as "Product" | "Material",
           category: String(category),
           serialTrackingRequired: Boolean(serialTrackingRequired),
+          reportMachine: itemType === "Product",
+          reportGroup: itemType === "Product" ? String(category) : null,
         },
       }),
     ),
@@ -196,19 +204,30 @@ export async function seedDemo(prisma: PrismaClient) {
     },
   });
 
+  const seededPickup = await prisma.pickupBatch.create({
+    data: {
+      code: "SYD-00265",
+      warehouseId: warehouses.SYD.id,
+      readyAt: new Date("2026-07-27T23:00:00.000Z"),
+    },
+  });
   const order = await prisma.outboundOrder.create({
     data: {
       shNo: "SH-2607-00175008",
       pickupCode: "SYD-00265",
+      pickupBatchId: seededPickup.id,
       erpWarehouse: "Sydney Material Warehouse",
       warehouseId: warehouses.SYD.id,
       status: "Ready_for_Pickup",
       customerLabel: "Service replacement",
+      preparedAt: new Date("2026-07-27T22:45:00.000Z"),
+      readyForPickupAt: new Date("2026-07-27T23:00:00.000Z"),
       lines: {
         create: {
           productId: products["97-223-00107-00"].id,
           requiredQty: 2,
           requiredCondition: "New",
+          erpWarehouse: "Sydney Material Warehouse",
           allocatedQty: 2,
           preparedQty: 2,
         },
@@ -238,6 +257,31 @@ export async function seedDemo(prisma: PrismaClient) {
       operationId: "seed-prepared-sh-2607-00175008",
       remark: "Seeded prepared reservation; physical quantity unchanged.",
       createdById: user.id,
+    },
+  });
+  await prisma.outboundOrder.create({
+    data: {
+      shNo: "SH-DEMO-PENDING-001",
+      erpWarehouse: "Mixed ERP warehouses",
+      warehouseId: warehouses.SYD.id,
+      status: "Pending_Allocation",
+      customerLabel: "Imported Replacement Unit Information",
+      lines: {
+        create: [
+          {
+            productId: products["97-229-00020-00"].id,
+            requiredQty: 1,
+            requiredCondition: "New",
+            erpWarehouse: "Sydney Material Warehouse",
+          },
+          {
+            productId: products["97-229-00021-00"].id,
+            requiredQty: 3,
+            requiredCondition: "Repair_Good",
+            erpWarehouse: "Sydney Good Product Warehouse",
+          },
+        ],
+      },
     },
   });
 

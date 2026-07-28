@@ -1,6 +1,12 @@
 # Lightweight Multi-Warehouse WMS Preview
 
-Sprint 1 is a PostgreSQL-backed Next.js WMS Preview for SYD, MEL and BNE. PostgreSQL is the authoritative store; browser state is used only for filters and forms. Inventory-changing commands run through Route Handlers, application services, domain validation, Prisma transactions and the ERP adapter.
+Sprint 2 is a PostgreSQL-backed Next.js WMS Preview for SYD, MEL and BNE. PostgreSQL is the authoritative store; browser state is used only for filters and forms. Inventory-changing commands run through Route Handlers, application services, domain validation, Prisma transactions and the ERP adapter.
+
+The operational outbound path is deliberately staged:
+
+`ERP import → Pending Allocation → Allocated → Prepared/Frozen → Ready for Pickup → Outbound → ERP sync`
+
+Sprint 2 also introduces native RepairJob completion, one-code/many-SH PickupBatch labels, product-driven machine reporting, explicit business timestamps, and read-only spreadsheet reconciliation policies.
 
 ## Requirements
 
@@ -47,6 +53,6 @@ pnpm lint
 pnpm build
 ```
 
-`ERP_ADAPTER=mock` keeps ERP calls server-side with deterministic Preview fixtures. The operational workbook at `reference/SYD_WMS_current_reference.xlsx` is read-only business evidence and is never imported by the runtime.
+`ERP_ADAPTER=mock` keeps ERP calls server-side with deterministic Preview fixtures. The operational workbook at `reference/SYD_WMS_current_reference.xlsx` is read-only business evidence and is never modified or imported by the runtime. During pilot/shadow mode, reconciliation maps exported ledger values by semantic fields and reports differences without posting adjustments.
 
 See [Architecture](docs/ARCHITECTURE.md), [Data Model](docs/DATA_MODEL.md), [Business Rules](docs/BUSINESS_RULES.md), [Workflows](docs/WORKFLOWS.md), and [Assumptions](docs/ASSUMPTIONS.md).

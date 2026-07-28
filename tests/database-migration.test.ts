@@ -11,6 +11,10 @@ describe("PostgreSQL integrity migrations", () => {
     path.join(process.cwd(), "prisma/migrations/20260728000000_sprint1_integrity/migration.sql"),
     "utf8",
   );
+  const sprint2 = fs.readFileSync(
+    path.join(process.cwd(), "prisma/migrations/20260728020000_sprint2_ledger_parity/migration.sql"),
+    "utf8",
+  );
 
   it("normalizes nullable relational dimensions in the logical balance key", () => {
     expect(initial).toContain('CREATE UNIQUE INDEX "InventoryBalance_relational_grain_key"');
@@ -22,5 +26,14 @@ describe("PostgreSQL integrity migrations", () => {
     expect(sprint).toContain('CREATE UNIQUE INDEX "RepairReturn_active_serial_key"');
     expect(sprint).toContain('WHERE "active" = true');
     expect(sprint).toContain('CREATE UNIQUE INDEX "OutboundAllocation_active_serial_key"');
+  });
+
+  it("migrates operational dates, pickup batches, repair jobs and reporting metadata", () => {
+    expect(sprint2).toContain('RENAME COLUMN "occurredAt" TO "recordedAt"');
+    expect(sprint2).toContain('ADD COLUMN "effectiveAt"');
+    expect(sprint2).toContain('CREATE TABLE "PickupBatch"');
+    expect(sprint2).toContain('CREATE TABLE "RepairJob"');
+    expect(sprint2).toContain('ADD COLUMN "outboundAt"');
+    expect(sprint2).toContain('ADD COLUMN "reportMachine"');
   });
 });
