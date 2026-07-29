@@ -8,6 +8,7 @@ import {
 } from "@/domain/bulk-serial";
 import { DomainError } from "@/domain/errors";
 import { getPrisma } from "@/lib/prisma";
+import { validateRegistration } from "@/services/server/bulk-serial-registration-service";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -20,6 +21,7 @@ export interface BulkSerialResult {
   location?: string;
   condition?: string;
   status?: string;
+  canRegisterAndAssign?: boolean;
 }
 
 export interface BulkSerialValidation {
@@ -77,6 +79,22 @@ async function validateAgainstDatabase(
   const assignedQty = alreadyAssignedHere.size;
   let acceptedNew = 0;
   const seen = new Set<string>();
+  const unknownNumbers = serialNumbers.filter((serialNumber) => !byNumber.has(serialNumber));
+  const soleLocation = allocatedLocations.size === 1
+    ? line.allocations[0]?.location
+    : undefined;
+  const unknownRegistration = soleLocation && unknownNumbers.length
+    ? await validateRegistration(db, {
+        warehouseCode: line.outboundOrder.warehouse.code,
+        locationCode: soleLocation.code,
+        sku: line.product.sku,
+        condition: line.requiredCondition,
+        serialNumbers: unknownNumbers,
+      })
+    : undefined;
+  const registerableUnknown = new Set(
+    unknownRegistration?.results.filter((row) => row.valid).map((row) => row.serialNumber) ?? [],
+  );
 
   const results = serialNumbers.map<BulkSerialResult>((serialNumber) => {
     const duplicate = seen.has(serialNumber);
@@ -89,6 +107,7 @@ async function validateAgainstDatabase(
       location: serial?.currentLocation?.code,
       condition: serial?.condition,
       status: serial?.status,
+      canRegisterAndAssign: !serial && registerableUnknown.has(serialNumber),
     };
     const decision = classifyBulkSerial({
       duplicate,
@@ -132,11 +151,64 @@ export class BulkSerialService {
     return validateAgainstDatabase(this.prisma, input);
   }
 
-  async commit(input: { orderId: string; lineId: string; serialNumbers: string[] }) {
+  async commit(input: {
+    orderId: string;
+    lineId: string;
+    serialNumbers: string[];
+    registerUnknownSerials?: string[];
+  }) {
     const normalized = normalizeSerialBatch(input.serialNumbers);
+    const registerUnknown = normalizeSerialBatch(input.registerUnknownSerials ?? []);
     if (!normalized.length) throw new DomainError("At least one serial number is required.", "EMPTY_SERIAL_BATCH");
     return this.prisma.$transaction(
       async (tx) => {
+        if (registerUnknown.length) {
+          if (registerUnknown.some((serialNumber) => !normalized.includes(serialNumber)))
+            throw new DomainError(
+              "Register-and-assign SNs must be part of the submitted assignment batch.",
+              "INVALID_REGISTER_AND_ASSIGN_BATCH",
+            );
+          const registrationLine = await tx.outboundOrderLine.findUnique({
+            where: { id: input.lineId },
+            include: {
+              product: true,
+              outboundOrder: { include: { warehouse: true } },
+              allocations: { where: { dispatchedAt: null }, include: { location: true } },
+            },
+          });
+          if (!registrationLine || registrationLine.outboundOrderId !== input.orderId)
+            throw new DomainError("Outbound order line not found.", "OUTBOUND_LINE_NOT_FOUND");
+          const locationIds = [...new Set(registrationLine.allocations.map((row) => row.locationId))];
+          if (locationIds.length !== 1)
+            throw new DomainError(
+              "Register-and-assign requires exactly one allocated physical location.",
+              "REGISTER_AND_ASSIGN_LOCATION_AMBIGUOUS",
+            );
+          const location = registrationLine.allocations[0].location;
+          const registration = await validateRegistration(tx, {
+            warehouseCode: registrationLine.outboundOrder.warehouse.code,
+            locationCode: location.code,
+            sku: registrationLine.product.sku,
+            condition: registrationLine.requiredCondition,
+            serialNumbers: registerUnknown,
+          });
+          if (registration.summary.invalid)
+            throw new DomainError(
+              "Unknown SN registration capacity or master-data validation changed.",
+              "REGISTER_AND_ASSIGN_REVALIDATION_FAILED",
+            );
+          await tx.serialNumber.createMany({
+            data: registerUnknown.map((serialNumber) => ({
+              serialNumber,
+              productId: registrationLine.productId,
+              currentWarehouseId: registrationLine.outboundOrder.warehouseId,
+              currentLocationId: location.id,
+              condition: registrationLine.requiredCondition,
+              status: "In_Stock",
+              sourceDocument: `Register-and-assign:${registrationLine.outboundOrder.shNo}`,
+            })),
+          });
+        }
         const validation = await validateAgainstDatabase(tx, { ...input, serialNumbers: normalized });
         const invalid = validation.results.filter((row) => !row.valid);
         if (invalid.length)
@@ -202,8 +274,9 @@ export class BulkSerialService {
               submitted: normalized.length,
               accepted,
               rejected: 0,
+              registeredUnknown: registerUnknown,
             },
-            remark: `Bulk serial assignment submitted ${normalized.length}; accepted ${accepted}; rejected 0.`,
+            remark: `Bulk serial assignment submitted ${normalized.length}; accepted ${accepted}; registered unknown ${registerUnknown.length}; rejected 0.`,
           },
         });
         return {
@@ -214,6 +287,7 @@ export class BulkSerialService {
           rejected: 0,
           assignedQty: validation.assignedQty + accepted,
           requiredQty: validation.requiredQty,
+          registeredUnknown: registerUnknown.length,
         };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },

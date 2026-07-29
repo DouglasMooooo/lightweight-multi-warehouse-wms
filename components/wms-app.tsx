@@ -27,6 +27,7 @@ import type {
 } from "@/domain/types";
 import type { ERPSerialLookup } from "@/integrations/erp-adapter";
 import { ReconciliationView } from "@/components/reconciliation-view";
+import { BulkSerialPage } from "@/components/bulk-serial-page";
 import { DashboardPage } from "@/components/dashboard/dashboard-page";
 import { InventoryPage } from "@/components/inventory/inventory-page";
 import { AppShell } from "@/components/layout/app-shell";
@@ -46,6 +47,7 @@ const routeTitleKeys: Record<string, string> = {
   dashboard: "title.dashboard", inventory: "title.inventory", outbound: "title.outbound",
   receiving: "title.receiving", repair: "title.repair", move: "title.move",
   adjustment: "title.adjustment", "sn-search": "title.snSearch", transfers: "title.transfers",
+  "bulk-sn": "title.bulkSn",
   stocktake: "title.stocktake", audit: "title.audit", exceptions: "title.exceptions",
   reconciliation: "title.reconciliation", admin: "title.admin",
 };
@@ -64,7 +66,7 @@ export function WmsApp({ path }: { path: string[] }) {
   useEffect(() => {
     let active = true;
     const boundedPage =
-      ["dashboard", "inventory", "sn-search", "audit"].includes(section) ||
+      ["dashboard", "inventory", "sn-search", "bulk-sn", "audit"].includes(section) ||
       (section === "outbound" && !detailId);
     const readUrl =
       section === "outbound" && detailId && subroute !== "label"
@@ -98,6 +100,19 @@ export function WmsApp({ path }: { path: string[] }) {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
+  async function refreshCurrent() {
+    const refreshUrl =
+      section === "outbound" && detailId && subroute !== "label"
+        ? `/api/outbound/${encodeURIComponent(detailId)}`
+        : ["dashboard", "inventory", "sn-search", "bulk-sn", "audit"].includes(section) ||
+            (section === "outbound" && !detailId)
+          ? "/api/bootstrap"
+          : "/api/wms";
+    const refreshed = await fetch(refreshUrl, { cache: "no-store" });
+    if (!refreshed.ok) throw new Error(t("common.loadFailed"));
+    setState((await refreshed.json()) as WmsState);
+  }
+
   async function commit(command: WmsCommand, success: string) {
     try {
       const response = await fetch("/api/wms", {
@@ -107,15 +122,7 @@ export function WmsApp({ path }: { path: string[] }) {
       });
       const body = (await response.json()) as { ok?: boolean; error?: string; code?: string };
       if (!response.ok) throw new Error("error" in body ? friendlyError(body.code, body.error) : friendlyError());
-      const refreshUrl =
-        section === "outbound" && detailId && subroute !== "label"
-          ? `/api/outbound/${encodeURIComponent(detailId)}`
-          : section === "outbound"
-            ? "/api/bootstrap"
-            : "/api/wms";
-      const refreshed = await fetch(refreshUrl, { cache: "no-store" });
-      if (!refreshed.ok) throw new Error(t("common.loadFailed"));
-      setState((await refreshed.json()) as WmsState);
+      await refreshCurrent();
       setToast({ message: success });
       return true;
     } catch (error) {
@@ -166,7 +173,7 @@ export function WmsApp({ path }: { path: string[] }) {
           {section === "inventory" && <InventoryPage warehouse={warehouse} />}
           {section === "outbound" &&
             (path[1] ? (
-              <OutboundDetail state={state} orderId={path[1]} commit={commit} />
+              <OutboundDetail state={state} orderId={path[1]} commit={commit} refresh={refreshCurrent} />
             ) : (
               <OutboundList state={state} warehouse={warehouse} commit={commit} />
             ))}
@@ -175,6 +182,9 @@ export function WmsApp({ path }: { path: string[] }) {
           {section === "move" && <MoveView state={state} commit={commit} />}
           {section === "adjustment" && <AdjustmentView state={state} commit={commit} />}
           {section === "sn-search" && <SerialSearchView state={state} />}
+          {section === "bulk-sn" && (
+            <BulkSerialPage state={state} warehouseCode={warehouse} onRefresh={refreshCurrent} />
+          )}
           {section === "transfers" && <TransferView state={state} commit={commit} />}
           {section === "stocktake" && <StocktakeView state={state} warehouse={warehouse} />}
           {section === "audit" && <AuditView state={state} />}
@@ -247,10 +257,7 @@ function OutboundList({
                 { type: "importOutbound", shNo: importSh.trim().toUpperCase() },
                 `${importSh.trim().toUpperCase()} imported as Pending Allocation; no stock frozen.`,
               );
-               if (accepted) {
-                 setImportSh("");
-                 window.location.reload();
-               }
+               if (accepted) setImportSh("");
             }}
           >
             <input
@@ -333,17 +340,21 @@ function OutboundDetail({
   state,
   orderId,
   commit,
+  refresh,
 }: {
   state: WmsState;
   orderId: string;
   commit: (command: WmsCommand, success: string) => Promise<boolean>;
+  refresh: () => Promise<void>;
 }) {
   const { t } = useI18n();
   const order = state.outboundOrders.find((row) => row.id === orderId);
+  const [activeLineId, setActiveLineId] = useState(order?.lines[0]?.id ?? "");
   const [scanner, setScanner] = useState<ScannerState>({ value: "", inFlight: false });
   const [serialBatch, setSerialBatch] = useState<string[]>([]);
   const [pasteList, setPasteList] = useState("");
   const [batchBusy, setBatchBusy] = useState(false);
+  const [registerUnknown, setRegisterUnknown] = useState<string[]>([]);
   const [batchValidation, setBatchValidation] = useState<{
     summary: { total: number; valid: number; invalid: number };
     results: Array<{
@@ -355,11 +366,16 @@ function OutboundDetail({
       location?: string;
       condition?: string;
       status?: string;
+      canRegisterAndAssign?: boolean;
     }>;
   }>();
   const scannerRef = useRef<HTMLInputElement>(null);
-  if (!order) return <Empty label="Outbound order not found." />;
-  const line = order.lines[0];
+  useEffect(() => {
+    if (order?.lines.length && !order.lines.some((row) => row.id === activeLineId))
+      setActiveLineId(order.lines[0].id);
+  }, [activeLineId, order]);
+  const line = order?.lines.find((row) => row.id === activeLineId) ?? order?.lines[0];
+  if (!order || !line) return <Empty label="Outbound order not found." />;
   const candidates = state.inventory.filter(
     (row) =>
       row.warehouseCode === order.warehouseCode &&
@@ -370,10 +386,12 @@ function OutboundDetail({
   const serialRequired = state.products.find((row) => row.sku === line.sku)?.serialTrackingRequired;
   const activeOrderId = order.id;
   const activeOrderShNo = order.shNo;
-  const activeLineId = line.id;
   const canDispatch =
-    line.preparedQty === line.requiredQty &&
-    (!serialRequired || line.scannedSerials.length === line.requiredQty) &&
+    order.lines.every((candidate) => {
+      const requiresSerial = state.products.find((row) => row.sku === candidate.sku)?.serialTrackingRequired;
+      return candidate.preparedQty === candidate.requiredQty &&
+        (!requiresSerial || candidate.scannedSerials.length === candidate.requiredQty);
+    }) &&
     order.status !== "Outbound";
   const canPrepare = line.allocatedQty > line.preparedQty && order.status !== "Outbound";
   const step =
@@ -437,6 +455,7 @@ function OutboundDetail({
       if (!response.ok) throw new Error(body.error ?? "Bulk validation failed.");
       setSerialBatch(serialNumbers);
       setBatchValidation(body);
+      setRegisterUnknown([]);
     } catch (error) {
       setScanner((current) => ({
         ...current,
@@ -459,6 +478,7 @@ function OutboundDetail({
       if (!response.ok) throw new Error(body.error ?? "Serial upload failed.");
       setSerialBatch(body.results.map((row: { serialNumber: string }) => row.serialNumber));
       setBatchValidation(body);
+      setRegisterUnknown([]);
     } catch (error) {
       setScanner((current) => ({
         ...current,
@@ -471,17 +491,26 @@ function OutboundDetail({
 
   async function confirmValidBatch() {
     const valid = batchValidation?.results.filter((row) => row.valid).map((row) => row.serialNumber) ?? [];
-    if (!valid.length) return;
+    const submitted = [...new Set([...valid, ...registerUnknown])];
+    if (!submitted.length) return;
     setBatchBusy(true);
     try {
       const response = await fetch(`/api/outbound/${activeOrderId}/serials/commit`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ lineId: activeLineId, serialNumbers: valid }),
+        body: JSON.stringify({
+          lineId: activeLineId,
+          serialNumbers: submitted,
+          registerUnknownSerials: registerUnknown,
+        }),
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? "Batch confirmation failed.");
-      window.location.reload();
+      await refresh();
+      setSerialBatch([]);
+      setRegisterUnknown([]);
+      setBatchValidation(undefined);
+      setBatchBusy(false);
     } catch (error) {
       setScanner((current) => ({
         ...current,
@@ -566,17 +595,25 @@ function OutboundDetail({
                   </tr>
                 </thead>
                 <tbody>
-                  <tr>
-                    <td className="mono strong">{line.sku}</td>
-                    <td>{line.model}</td>
-                    <td>
-                      <Badge>{line.requiredCondition}</Badge>
-                    </td>
-                    <td className="number strong">{line.requiredQty}</td>
-                    <td className="number">{line.allocatedQty}</td>
-                    <td className="number">{line.preparedQty}</td>
-                    <td className="number">{line.dispatchedQty}</td>
-                  </tr>
+                  {order.lines.map((candidate) => (
+                    <tr
+                      key={candidate.id}
+                      className={candidate.id === line.id ? "selected-row" : ""}
+                      onClick={() => {
+                        setActiveLineId(candidate.id);
+                        setSerialBatch([]);
+                        setBatchValidation(undefined);
+                      }}
+                    >
+                      <td className="mono strong">{candidate.sku}</td>
+                      <td>{candidate.model}</td>
+                      <td><Badge>{candidate.requiredCondition}</Badge></td>
+                      <td className="number strong">{candidate.requiredQty}</td>
+                      <td className="number">{candidate.allocatedQty}</td>
+                      <td className="number">{candidate.preparedQty}</td>
+                      <td className="number">{candidate.dispatchedQty}</td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
@@ -690,13 +727,35 @@ function OutboundDetail({
                         <tr key={`${row.serialNumber}:${index}`}>
                           <td className="mono">{row.serialNumber}</td><td>{row.sku ?? "—"}</td>
                           <td>{row.location ?? "—"}</td><td>{row.condition ?? "—"}</td><td>{row.status ?? "—"}</td>
-                          <td><Badge tone={row.valid ? "teal" : "red"}>{row.valid ? "Valid" : row.code}</Badge><div className="subtle">{row.message}</div></td>
+                          <td>
+                            <Badge tone={row.valid ? "teal" : "red"}>{row.valid ? "Valid" : row.code}</Badge>
+                            <div className="subtle">{row.message}</div>
+                            {row.canRegisterAndAssign && (
+                              <label className="checkbox-row">
+                                <input
+                                  type="checkbox"
+                                  checked={registerUnknown.includes(row.serialNumber)}
+                                  onChange={(event) => setRegisterUnknown((current) =>
+                                    event.target.checked
+                                      ? [...new Set([...current, row.serialNumber])]
+                                      : current.filter((value) => value !== row.serialNumber),
+                                  )}
+                                />
+                                Register and Assign
+                              </label>
+                            )}
+                          </td>
                         </tr>
                       ))}</tbody>
                     </table>
                   </div>
-                  <Button className="primary" type="button" onClick={confirmValidBatch} disabled={!batchValidation.summary.valid || batchBusy}>
-                    Confirm {batchValidation.summary.valid} valid SN
+                  <Button
+                    className="primary"
+                    type="button"
+                    onClick={confirmValidBatch}
+                    disabled={batchValidation.summary.valid + registerUnknown.length === 0 || batchBusy}
+                  >
+                    Confirm {batchValidation.summary.valid + registerUnknown.length} SN
                   </Button>
                 </>
               )}

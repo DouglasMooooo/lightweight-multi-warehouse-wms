@@ -9,6 +9,7 @@ export const dynamic = "force-dynamic";
 const schema = z.object({
   lineId: z.string().min(1),
   serialNumbers: z.array(z.string()).min(1).max(1000),
+  registerUnknownSerials: z.array(z.string()).max(1000).optional(),
 });
 
 export async function POST(request: Request, context: { params: Promise<{ orderId: string }> }) {

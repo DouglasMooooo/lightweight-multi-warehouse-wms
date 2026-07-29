@@ -45,6 +45,7 @@ const nav: Array<{
       ["/move", "nav.move", Move],
       ["/adjustment", "nav.adjustment", SlidersHorizontal, "adjustment:create"],
       ["/sn-search", "nav.snSearch", ScanLine],
+      ["/bulk-sn", "nav.bulkSn", ScanLine],
       ["/transfers", "nav.transfers", Truck],
       ["/stocktake", "nav.stocktake", ClipboardCheck, "stocktake:approve"],
     ],

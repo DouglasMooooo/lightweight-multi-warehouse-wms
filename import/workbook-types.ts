@@ -148,10 +148,15 @@ export interface ShadowOutboundOrder {
   lines: Array<{
     sku?: string;
     model?: string;
+    condition: StockCondition;
     quantity: number;
     erpWarehouse?: string;
-    sourceLocation?: string;
     serialNumbers: string[];
+    sourceAllocations: Array<{
+      location: string;
+      quantity: number;
+      serialNumbers: string[];
+    }>;
   }>;
 }
 
@@ -202,6 +207,7 @@ export interface ShadowImportResult {
   sourceChecksum: string;
   cutoverAt: string;
   workbookRows: number;
+  migrationExcludedRows: number;
   acceptedRows: number;
   warningRows: number;
   rejectedRows: number;

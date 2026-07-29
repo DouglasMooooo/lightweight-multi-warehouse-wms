@@ -30,6 +30,7 @@ export function ReconciliationView({ warehouse }: { warehouse: Warehouse }) {
     adminTools: process.env.NEXT_PUBLIC_ENABLE_ADMIN_TOOLS,
   });
   const [mode, setMode] = useState<"DRY_RUN" | "SHADOW_SEED">("DRY_RUN");
+  const [replaceExisting, setReplaceExisting] = useState(false);
   const [result, setResult] = useState<Result>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -73,6 +74,7 @@ export function ReconciliationView({ warehouse }: { warehouse: Warehouse }) {
       form.set("file", file);
       form.set("cutoverAt", warehouseWallClockToUtc(cutoverAt, warehouse.timezone).toISOString());
       form.set("mode", seedVisible ? mode : "DRY_RUN");
+      form.set("replaceExisting", mode === "SHADOW_SEED" && replaceExisting ? "true" : "false");
       const response = await fetch("/api/reconciliation", { method: "POST", body: form });
       const body = (await response.json()) as Result | { error: string };
       if (!response.ok) throw new Error("error" in body ? body.error : "Reconciliation failed.");
@@ -125,6 +127,16 @@ export function ReconciliationView({ warehouse }: { warehouse: Warehouse }) {
             </select>
           </div>
           <div className="field full">
+            {seedVisible && mode === "SHADOW_SEED" && (
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={replaceExisting}
+                  onChange={(event) => setReplaceExisting(event.target.checked)}
+                />
+                Replace existing Preview operational data with this workbook (non-production only)
+              </label>
+            )}
             <div className="cutover-preview">
               <strong>{t("reconciliation.cutover")}:</strong>{" "}
               {cutoverPreview

@@ -29,6 +29,7 @@ export async function POST(request: Request) {
         sourceFileName: file.name,
         mode,
         cutoverAt,
+        replaceExisting: form.get("replaceExisting") === "true",
       }),
     );
     console.info("Shadow import completed", {

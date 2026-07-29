@@ -41,6 +41,7 @@ async function main() {
   sourceChecksum: result.sourceChecksum,
   cutoverAt: result.cutoverAt,
   workbookRows: result.workbookRows,
+  migrationExcludedRows: result.migrationExcludedRows,
   acceptedRows: result.acceptedRows,
   productRows: result.productRows.length,
   locationRows: result.locationRows.length,

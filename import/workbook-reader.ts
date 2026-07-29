@@ -1,9 +1,28 @@
 import { createHash } from "node:crypto";
 import ExcelJS from "exceljs";
+import JSZip from "jszip";
 import { DomainError } from "@/domain/errors";
 import type { RawWorkbook, WorkbookCellValue } from "./workbook-types";
 
 export const MAX_WORKBOOK_BYTES = 20 * 1024 * 1024;
+
+async function normalizeOpenXmlNamespaces(buffer: Buffer) {
+  const zip = await JSZip.loadAsync(buffer);
+  let changed = false;
+  for (const path of ["[Content_Types].xml", "xl/_rels/workbook.xml.rels"]) {
+    const file = zip.file(path);
+    if (!file) continue;
+    const original = await file.async("string");
+    if (!original.includes("ns0:")) continue;
+    const normalized = original
+      .replaceAll("<ns0:", "<")
+      .replaceAll("</ns0:", "</")
+      .replace("xmlns:ns0=", "xmlns=");
+    zip.file(path, normalized);
+    changed = true;
+  }
+  return changed ? Buffer.from(await zip.generateAsync({ type: "uint8array" })) : buffer;
+}
 
 function safeCellValue(value: ExcelJS.CellValue): WorkbookCellValue {
   if (value === null || value === undefined) return null;
@@ -29,7 +48,8 @@ export async function readWorkbookBuffer(
       "FILE_TOO_LARGE",
     );
   const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(buffer as never, {
+  const readableBuffer = await normalizeOpenXmlNamespaces(buffer);
+  await workbook.xlsx.load(readableBuffer as never, {
     ignoreNodes: [
       "dataValidations",
       "extLst",

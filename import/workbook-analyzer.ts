@@ -43,6 +43,8 @@ const CURRENT_STOCK_SHEETS = ["Current_Stock_Detail", "当前库存明细查询"
 const PRODUCT_SHEETS = ["Product_Stock_Master", "产品维护"];
 const LOCATION_SHEETS = ["Location_Master", "库位维护"];
 
+const MIGRATION_EXCLUDED_SHEETS = ["Migration_Excluded_Rows"];
+
 function issue(
   issues: ImportIssue[],
   input: Omit<ImportIssue, "classification"> & {
@@ -490,20 +492,42 @@ function mapActiveWork(ledger: WorkbookLedgerRow[]) {
         candidate.sku === row.sku &&
         candidate.model === row.model &&
         candidate.erpWarehouse === row.erpWarehouse &&
-        candidate.sourceLocation === row.fromLocation,
+        candidate.condition === row.condition,
     );
     if (line) {
       line.quantity += row.quantity;
       if (row.serialNumber && !line.serialNumbers.includes(row.serialNumber))
         line.serialNumbers.push(row.serialNumber);
+      if (row.fromLocation) {
+        const allocation = line.sourceAllocations.find(
+          (candidate) => candidate.location === row.fromLocation,
+        );
+        if (allocation) {
+          allocation.quantity += row.quantity;
+          if (row.serialNumber && !allocation.serialNumbers.includes(row.serialNumber))
+            allocation.serialNumbers.push(row.serialNumber);
+        } else
+          line.sourceAllocations.push({
+            location: row.fromLocation,
+            quantity: row.quantity,
+            serialNumbers: row.serialNumber ? [row.serialNumber] : [],
+          });
+      }
     } else
       order.lines.push({
         sku: row.sku,
         model: row.model,
+        condition: row.condition,
         quantity: row.quantity,
         erpWarehouse: row.erpWarehouse,
-        sourceLocation: row.fromLocation,
         serialNumbers: row.serialNumber ? [row.serialNumber] : [],
+        sourceAllocations: row.fromLocation
+          ? [{
+              location: row.fromLocation,
+              quantity: row.quantity,
+              serialNumbers: row.serialNumber ? [row.serialNumber] : [],
+            }]
+          : [],
       });
     orderMap.set(row.shNo, order);
   }
@@ -690,6 +714,11 @@ export function analyzeWorkbook(
   const locationSheet = findSheet(workbook.sheets, LOCATION_SHEETS);
   const ledgerSheet = findSheet(workbook.sheets, LEDGER_SHEETS);
   const currentSheet = findSheet(workbook.sheets, CURRENT_STOCK_SHEETS, false);
+  const migrationExcludedSheet = findSheet(
+    workbook.sheets,
+    MIGRATION_EXCLUDED_SHEETS,
+    false,
+  );
   const productRows = parseProducts(
     mapSemanticRows(productSheet!, PRODUCT_HEADER_ALIASES, ["sku", "model", "itemType"]),
     issues,
@@ -724,7 +753,23 @@ export function analyzeWorkbook(
   addMasterReconciliation(productRows, locationRows, input.wms, now, reconciliation);
   addInventoryReconciliation(current.balances, input.wms.balances, "WORKBOOK_VIEW", now, reconciliation);
   addInventoryReconciliation(ledgerProjectedBalances, input.wms.balances, "WORKBOOK_LEDGER", now, reconciliation);
-  const workbookSerials = current.serials.length > 0 ? current.serials : ledgerProjectedSerials;
+  const serialMap = new Map(
+    ledgerProjectedSerials.map((row) => [row.serialNumber, row]),
+  );
+  for (const row of current.serials) serialMap.set(row.serialNumber, row);
+  const workbookSerials = [...serialMap.values()];
+  for (const balance of current.balances) {
+    if (balance.itemType !== "Product" || !balance.sku) continue;
+    const represented = workbookSerials.filter(
+      (serial) =>
+        serial.sku === balance.sku &&
+        serial.warehouse === balance.warehouse &&
+        serial.location === balance.location &&
+        serial.condition === balance.condition &&
+        ["In_Stock", "Prepared", "Repair", "Scrapped"].includes(serial.status),
+    ).length;
+    balance.legacySerialGap = represented < balance.physicalQty;
+  }
   for (const result of reconcileSerials(workbookSerials, input.wms.serials)) {
     reconciliation.push({
       timestamp: now,
@@ -808,6 +853,10 @@ export function analyzeWorkbook(
     sourceChecksum: workbook.sourceChecksum,
     cutoverAt: input.cutoverAt.toISOString(),
     workbookRows: rawLedgerRows.length,
+    migrationExcludedRows:
+      migrationExcludedSheet?.rows
+        .slice(1)
+        .filter((row) => row.some((cell) => cell !== null && cell !== "")).length ?? 0,
     acceptedRows: ledgerRows.length,
     warningRows,
     rejectedRows,
