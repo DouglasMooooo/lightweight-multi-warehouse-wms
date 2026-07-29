@@ -2,9 +2,13 @@ import "server-only";
 
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@/generated/prisma/client";
+import { Pool } from "pg";
 import { assertSafeEnvironment } from "@/lib/environment";
 
-const globalForPrisma = globalThis as unknown as { wmsPrisma?: PrismaClient };
+const globalForPrisma = globalThis as unknown as {
+  wmsPrisma?: PrismaClient;
+  wmsPgPool?: Pool;
+};
 
 export function getPrisma() {
   assertSafeEnvironment({
@@ -16,7 +20,16 @@ export function getPrisma() {
   if (globalForPrisma.wmsPrisma) return globalForPrisma.wmsPrisma;
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) throw new Error("DATABASE_URL is required.");
-  const client = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
-  if (process.env.NODE_ENV !== "production") globalForPrisma.wmsPrisma = client;
+  const pool =
+    globalForPrisma.wmsPgPool ??
+    new Pool({
+      connectionString,
+      max: Number(process.env.DATABASE_POOL_MAX ?? (process.env.VERCEL ? 5 : 10)),
+      idleTimeoutMillis: 30_000,
+      connectionTimeoutMillis: 10_000,
+    });
+  const client = new PrismaClient({ adapter: new PrismaPg(pool) });
+  globalForPrisma.wmsPgPool = pool;
+  globalForPrisma.wmsPrisma = client;
   return client;
 }

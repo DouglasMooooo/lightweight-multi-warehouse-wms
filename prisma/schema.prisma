@@ -262,6 +262,7 @@ model InventoryBalance {
   product        Product?        @relation(fields: [productId], references: [id], onDelete: Restrict)
 
   @@index([warehouseId, locationId])
+  @@index([warehouseId, locationId, productId, condition])
   @@index([productId, condition])
 }
 
@@ -397,6 +398,7 @@ model OutboundAllocation {
   @@index([outboundOrderLineId])
   @@index([locationId])
   @@index([containerId])
+  @@index([serialNumberId])
 }
 
 model RepairReturn {

@@ -39,3 +39,11 @@ Until explicit cutover approval, the workbook remains the production operational
 - Warehouse wall-clock input is interpreted using the selected Warehouse `timezone`. The Sydney default is `Australia/Sydney`, including DST.
 - Vercel deployments must define `DATABASE_ENV`. Preview/staging with production database metadata is rejected; Production requires `DATABASE_ENV=production`.
 - Role-aware navigation uses server-returned permissions for preparation only. API/domain authorization remains the authoritative future enforcement point; this sprint does not claim complete RBAC.
+
+## Sprint 3.6 real-data observations
+
+- The latest fixture checksum is `84402AAD17583540AC2758DADFFA5AE27E50A50885A5CD141AF456952B8AE293`; it supersedes the older Sprint 3 inspection checksum for this validation only.
+- Thirty-nine ledger rows contain literal `Item type not found`, and seven additional business rows have blank Item Type after display-only exclusions. They are rejected; Product or Material is not inferred from SKU/model.
+- Seventeen Outbound actions lack `Outbound_Date`. They remain reference evidence and do not create an invented physical dispatch timestamp.
+- Weekly/monthly date-only values follow `Australia/Sydney`; observed Google Sheet `America/Los_Angeles` metadata is not inherited.
+- Vercel Preview functions are currently configured for `iad1` while the Neon Preview database is in Sydney. This mismatch is documented and must not be changed in production without a controlled comparison.

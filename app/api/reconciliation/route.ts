@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { DomainError } from "@/domain/errors";
+import { timed } from "@/lib/performance";
 import { ShadowImportService } from "@/services/server/shadow-import-service";
 
 export const runtime = "nodejs";
@@ -17,12 +18,19 @@ export async function POST(request: Request) {
     if (Number.isNaN(cutoverAt.valueOf()))
       throw new DomainError("A valid shadow cutover timestamp is required.", "INVALID_CUTOVER_AT");
     const mode = modeSchema.parse(form.get("mode") ?? "DRY_RUN");
-    const result = await new ShadowImportService().run({
-      buffer: Buffer.from(await file.arrayBuffer()),
-      sourceFileName: file.name,
-      mode,
-      cutoverAt,
-    });
+    const result = await timed(
+      {
+        route: "POST /api/reconciliation",
+        queryName: "workbookReconciliation",
+        rowCount: (value) => value.workbookRows,
+      },
+      async () => new ShadowImportService().run({
+        buffer: Buffer.from(await file.arrayBuffer()),
+        sourceFileName: file.name,
+        mode,
+        cutoverAt,
+      }),
+    );
     console.info("Shadow import completed", {
       batchKey: result.batchKey,
       fileName: result.sourceFileName,

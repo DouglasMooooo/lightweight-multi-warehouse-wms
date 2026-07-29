@@ -2,30 +2,44 @@
 
 import { Plus, ScanLine, Search } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
-import type { WarehouseCode, WmsState } from "@/domain/types";
+import { useEffect, useState } from "react";
+import type { InventoryBalance, WarehouseCode } from "@/domain/types";
 import { useI18n } from "@/i18n/provider";
 import { Badge, StatusBadge } from "@/components/shared/status-badge";
-import { cn, EmptyState, PageHeader } from "@/components/shared/ui";
+import { Button, cn, EmptyState, PageHeader } from "@/components/shared/ui";
 
-export function InventoryPage({ state, warehouse }: { state: WmsState; warehouse: WarehouseCode }) {
+export function InventoryPage({ warehouse }: { warehouse: WarehouseCode }) {
   const { t } = useI18n();
   const [query, setQuery] = useState("");
   const [condition, setCondition] = useState("All");
   const [showRepair, setShowRepair] = useState(false);
   const [showMaterial, setShowMaterial] = useState(false);
   const [showZero, setShowZero] = useState(false);
-  const rows = state.inventory.filter((row) => {
-    const haystack = `${row.locationCode} ${row.containerCode ?? ""} ${row.sku ?? ""} ${row.model}`.toLowerCase();
-    return (
-      row.warehouseCode === warehouse &&
-      haystack.includes(query.toLowerCase()) &&
-      (condition === "All" || row.condition === condition) &&
-      (showZero || row.physicalQty !== 0) &&
-      (showRepair || row.condition !== "Repair") &&
-      (showMaterial || row.itemType !== "Material")
-    );
-  });
+  const [page, setPage] = useState(1);
+  const [data, setData] = useState<{ rows: InventoryBalance[]; total: number; totalPages: number }>();
+  const [error, setError] = useState("");
+  useEffect(() => {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      const params = new URLSearchParams({
+        page: String(page), pageSize: "50", warehouse,
+        positiveOnly: String(!showZero),
+      });
+      if (query) params.set("sku", query);
+      if (condition !== "All") params.set("condition", condition);
+      if (!showMaterial) params.set("itemType", "Product");
+      if (!showRepair && condition === "All") params.set("excludeRepair", "true");
+      fetch(`/api/inventory?${params}`, { cache: "no-store", signal: controller.signal })
+        .then(async (response) => {
+          if (!response.ok) throw new Error(t("common.loadFailed"));
+          const body = await response.json();
+          setData(body);
+        })
+        .catch((reason) => { if (reason?.name !== "AbortError") setError(reason instanceof Error ? reason.message : t("common.loadFailed")); });
+    }, 180);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [condition, page, query, showMaterial, showRepair, showZero, t, warehouse]);
+  const rows = data?.rows ?? [];
   return (
     <>
       <PageHeader
@@ -67,6 +81,12 @@ export function InventoryPage({ state, warehouse }: { state: WmsState; warehouse
             ))}</tbody>
           </table>
           {!rows.length && <EmptyState label={t("inventory.empty")} />}
+        </div>
+        {error && <div className="notice error">{error}</div>}
+        <div className="toolbar">
+          <span className="subtle">{data?.total ?? 0} rows · page {page} / {data?.totalPages ?? 1}</span>
+          <Button type="button" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>Previous</Button>
+          <Button type="button" disabled={page >= (data?.totalPages ?? 1)} onClick={() => setPage((value) => value + 1)}>Next</Button>
         </div>
       </div>
     </>

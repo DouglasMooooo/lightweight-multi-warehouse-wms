@@ -1,0 +1,14 @@
+import { NextResponse } from "next/server";
+import { timed } from "@/lib/performance";
+import { PageQueryService } from "@/services/server/page-query-service";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+export async function GET(request: Request) {
+  const warehouse = new URL(request.url).searchParams.get("warehouse") ?? "SYD";
+  return NextResponse.json(await timed(
+    { route: "GET /api/dashboard", queryName: "dashboardAggregates" },
+    () => new PageQueryService().dashboard(warehouse),
+  ));
+}

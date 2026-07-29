@@ -539,7 +539,7 @@ export class WmsApplicationService {
     };
   }
 
-  async execute(command: WmsCommand): Promise<WmsState> {
+  async execute(command: WmsCommand) {
     if (command.type === "resetDemo") {
       try {
         assertDemoResetAllowed({
@@ -550,7 +550,7 @@ export class WmsApplicationService {
         throw new DomainError("Demo reset is disabled outside explicit non-production demo mode.");
       }
       await seedDemo(this.prisma);
-      return this.snapshot();
+      return { ok: true, commandType: command.type, status: "Completed" };
     }
     switch (command.type) {
       case "importOutbound":
@@ -596,7 +596,7 @@ export class WmsApplicationService {
         await this.receiveTransfer(command.transferId, command.destinationLocation);
         break;
     }
-    return this.snapshot();
+    return { ok: true, commandType: command.type, status: "Completed" };
   }
 
   async lookupFaulty(serialNumber: string): Promise<ERPSerialLookup> {
@@ -1054,7 +1054,18 @@ export class WmsApplicationService {
           operationType: "Outbound",
           entityType: "OutboundOrder",
           entityId: order.id,
-          payload: { shNo: order.shNo, warehouse: order.warehouse.code },
+          payload: {
+            shNo: order.shNo,
+            pickupCode: order.pickupCode,
+            warehouse: order.warehouse.code,
+            lines: order.lines.map((line) => ({
+              sku: line.product.sku,
+              qty: number(line.requiredQty),
+              serialNumbers: line.allocations.flatMap((allocation) =>
+                allocation.serialNumber ? [allocation.serialNumber.serialNumber] : [],
+              ),
+            })),
+          },
           outboundOrderId: order.id,
         },
       });

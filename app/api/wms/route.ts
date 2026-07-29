@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { DomainError } from "@/domain/errors";
 import type { WmsCommand } from "@/domain/types";
+import { timed } from "@/lib/performance";
 import { WmsApplicationService } from "@/services/server/wms-service";
 
 export const runtime = "nodejs";
@@ -113,7 +114,10 @@ function errorResponse(error: unknown) {
 
 export async function GET() {
   try {
-    return NextResponse.json(await new WmsApplicationService().snapshot());
+    return NextResponse.json(await timed(
+      { route: "GET /api/wms", queryName: "legacyFullSnapshot" },
+      () => new WmsApplicationService().snapshot(),
+    ));
   } catch (error) {
     return errorResponse(error);
   }
@@ -122,7 +126,10 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const command = commandSchema.parse(await request.json()) as WmsCommand;
-    return NextResponse.json(await new WmsApplicationService().execute(command));
+    return NextResponse.json(await timed(
+      { route: "POST /api/wms", queryName: `command:${command.type}` },
+      () => new WmsApplicationService().execute(command),
+    ));
   } catch (error) {
     return errorResponse(error);
   }

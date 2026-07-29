@@ -69,11 +69,36 @@ export class ShadowImportService {
     mode: ShadowImportMode;
     cutoverAt: Date;
   }) {
+    const parseStartedAt = performance.now();
     const workbook = await readWorkbookBuffer(input.buffer, input.sourceFileName);
+    console.info("wms_timing", {
+      route: "shadow-import",
+      durationMs: Math.round(performance.now() - parseStartedAt),
+      queryName: "workbookParsing",
+      rowCount: workbook.sheets.reduce((sum, sheet) => sum + sheet.rows.length, 0),
+      environment: process.env.VERCEL_ENV ?? process.env.NODE_ENV,
+    });
+    const referenceStartedAt = performance.now();
+    const reference = await this.reference();
+    console.info("wms_timing", {
+      route: "shadow-import",
+      durationMs: Math.round(performance.now() - referenceStartedAt),
+      queryName: "postgresReference",
+      rowCount: reference.balances.length,
+      environment: process.env.VERCEL_ENV ?? process.env.NODE_ENV,
+    });
+    const reconciliationStartedAt = performance.now();
     const result = analyzeWorkbook(workbook, {
       mode: input.mode,
       cutoverAt: input.cutoverAt,
-      wms: await this.reference(),
+      wms: reference,
+    });
+    console.info("wms_timing", {
+      route: "shadow-import",
+      durationMs: Math.round(performance.now() - reconciliationStartedAt),
+      queryName: "reconciliation",
+      rowCount: result.reconciliation.length,
+      environment: process.env.VERCEL_ENV ?? process.env.NODE_ENV,
     });
     if (input.mode === "DRY_RUN") return { ...result, seeded: false, duplicate: false };
     return this.seed(result);

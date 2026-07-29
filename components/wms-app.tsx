@@ -53,6 +53,8 @@ const routeTitleKeys: Record<string, string> = {
 export function WmsApp({ path }: { path: string[] }) {
   const { t, error: friendlyError } = useI18n();
   const section = path[0] ?? "dashboard";
+  const detailId = path[1];
+  const subroute = path[2];
   const [state, setState] = useState<WmsState | null>(null);
   const [ready, setReady] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -61,7 +63,16 @@ export function WmsApp({ path }: { path: string[] }) {
 
   useEffect(() => {
     let active = true;
-    fetch("/api/wms", { cache: "no-store" })
+    const boundedPage =
+      ["dashboard", "inventory", "sn-search", "audit"].includes(section) ||
+      (section === "outbound" && !detailId);
+    const readUrl =
+      section === "outbound" && detailId && subroute !== "label"
+        ? `/api/outbound/${encodeURIComponent(detailId)}`
+        : boundedPage
+          ? "/api/bootstrap"
+          : "/api/wms";
+    fetch(readUrl, { cache: "no-store" })
       .then(async (response) => {
         const body = (await response.json()) as WmsState | { error: string; code?: string };
         if (!response.ok) throw new Error(t("common.loadFailed"));
@@ -79,7 +90,7 @@ export function WmsApp({ path }: { path: string[] }) {
     return () => {
       active = false;
     };
-  }, [friendlyError, t]);
+  }, [detailId, friendlyError, section, subroute, t]);
 
   useEffect(() => {
     if (!toast) return;
@@ -94,9 +105,17 @@ export function WmsApp({ path }: { path: string[] }) {
         headers: { "content-type": "application/json" },
         body: JSON.stringify(command),
       });
-      const body = (await response.json()) as WmsState | { error: string; code?: string };
+      const body = (await response.json()) as { ok?: boolean; error?: string; code?: string };
       if (!response.ok) throw new Error("error" in body ? friendlyError(body.code, body.error) : friendlyError());
-      setState(body as WmsState);
+      const refreshUrl =
+        section === "outbound" && detailId && subroute !== "label"
+          ? `/api/outbound/${encodeURIComponent(detailId)}`
+          : section === "outbound"
+            ? "/api/bootstrap"
+            : "/api/wms";
+      const refreshed = await fetch(refreshUrl, { cache: "no-store" });
+      if (!refreshed.ok) throw new Error(t("common.loadFailed"));
+      setState((await refreshed.json()) as WmsState);
       setToast({ message: success });
       return true;
     } catch (error) {
@@ -143,8 +162,8 @@ export function WmsApp({ path }: { path: string[] }) {
       toast={toast}
       currentUser={state.currentUser}
     >
-          {section === "dashboard" && <DashboardPage state={state} warehouse={warehouse} />}
-          {section === "inventory" && <InventoryPage state={state} warehouse={warehouse} />}
+          {section === "dashboard" && <DashboardPage warehouse={warehouse} />}
+          {section === "inventory" && <InventoryPage warehouse={warehouse} />}
           {section === "outbound" &&
             (path[1] ? (
               <OutboundDetail state={state} orderId={path[1]} commit={commit} />
@@ -181,7 +200,25 @@ function OutboundList({
   const [query, setQuery] = useState("");
   const [importSh, setImportSh] = useState("");
   const [queue, setQueue] = useState("Active");
-  const orders = state.outboundOrders.filter(
+  const [page, setPage] = useState(1);
+  const [outboundPage, setOutboundPage] = useState<{ rows: OutboundOrder[]; total: number; totalPages: number }>({
+    rows: state.outboundOrders,
+    total: state.outboundOrders.length,
+    totalPages: 1,
+  });
+  useEffect(() => {
+    const controller = new AbortController();
+    const params = new URLSearchParams({ page: String(page), pageSize: "50", warehouse });
+    if (queue !== "Active") params.set("status", queue);
+    fetch(`/api/outbound?${params}`, { cache: "no-store", signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(t("common.loadFailed"));
+        setOutboundPage(await response.json());
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [page, queue, t, warehouse]);
+  const orders = outboundPage.rows.filter(
     (order) =>
       order.warehouseCode === warehouse &&
       (queue === "Active"
@@ -210,7 +247,10 @@ function OutboundList({
                 { type: "importOutbound", shNo: importSh.trim().toUpperCase() },
                 `${importSh.trim().toUpperCase()} imported as Pending Allocation; no stock frozen.`,
               );
-              if (accepted) setImportSh("");
+               if (accepted) {
+                 setImportSh("");
+                 window.location.reload();
+               }
             }}
           >
             <input
@@ -280,6 +320,11 @@ function OutboundList({
           );
         })}
       </div>
+      <div className="toolbar">
+        <span className="subtle">{outboundPage.total} rows · page {page} / {outboundPage.totalPages || 1}</span>
+        <Button type="button" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>Previous</Button>
+        <Button type="button" disabled={page >= outboundPage.totalPages} onClick={() => setPage((value) => value + 1)}>Next</Button>
+      </div>
     </>
   );
 }
@@ -293,9 +338,25 @@ function OutboundDetail({
   orderId: string;
   commit: (command: WmsCommand, success: string) => Promise<boolean>;
 }) {
-  const { locale, t } = useI18n();
+  const { t } = useI18n();
   const order = state.outboundOrders.find((row) => row.id === orderId);
   const [scanner, setScanner] = useState<ScannerState>({ value: "", inFlight: false });
+  const [serialBatch, setSerialBatch] = useState<string[]>([]);
+  const [pasteList, setPasteList] = useState("");
+  const [batchBusy, setBatchBusy] = useState(false);
+  const [batchValidation, setBatchValidation] = useState<{
+    summary: { total: number; valid: number; invalid: number };
+    results: Array<{
+      serialNumber: string;
+      valid: boolean;
+      code: string;
+      message: string;
+      sku?: string;
+      location?: string;
+      condition?: string;
+      status?: string;
+    }>;
+  }>();
   const scannerRef = useRef<HTMLInputElement>(null);
   if (!order) return <Empty label="Outbound order not found." />;
   const line = order.lines[0];
@@ -338,18 +399,96 @@ function OutboundDetail({
       restoreScannerFocus(scannerRef.current);
       return;
     }
-    setScanner(started.state);
-    const accepted = await commit(
-      { type: "scanOutboundSerial", orderId: activeOrderId, lineId: activeLineId, serialNumber: started.value },
-      `${t("scanner.accepted")}: ${started.value} · ${activeOrderShNo}`,
-    );
-    setScanner((current) =>
-      completeScanSubmission(current, {
-        accepted,
-        message: accepted ? t("scanner.accepted") : locale === "zh-CN" ? "扫描未通过，请查看上方错误。" : "Scan rejected; review the error above.",
+    const duplicate = serialBatch.includes(started.value);
+    if (!duplicate) setSerialBatch((current) => [...current, started.value]);
+    setBatchValidation(undefined);
+    setScanner(
+      completeScanSubmission(started.state, {
+        accepted: !duplicate,
+        message: duplicate
+          ? t("scanner.duplicate")
+          : `${t("scanner.accepted")}: ${started.value} · ${activeOrderShNo}`,
       }),
     );
     window.setTimeout(() => restoreScannerFocus(scannerRef.current), 0);
+  }
+
+  function addPastedSerials() {
+    const values = pasteList
+      .split(/[\r\n,\t;]+/)
+      .map((value) => value.trim().toUpperCase())
+      .filter(Boolean);
+    setSerialBatch((current) => [...new Set([...current, ...values])]);
+    setPasteList("");
+    setBatchValidation(undefined);
+    window.setTimeout(() => restoreScannerFocus(scannerRef.current), 0);
+  }
+
+  async function validateBatch(serialNumbers = serialBatch) {
+    if (!serialNumbers.length) return;
+    setBatchBusy(true);
+    try {
+      const response = await fetch(`/api/outbound/${activeOrderId}/serials/validate`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ lineId: activeLineId, serialNumbers }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Bulk validation failed.");
+      setSerialBatch(serialNumbers);
+      setBatchValidation(body);
+    } catch (error) {
+      setScanner((current) => ({
+        ...current,
+        feedback: { tone: "error", message: error instanceof Error ? error.message : "Bulk validation failed." },
+      }));
+    } finally {
+      setBatchBusy(false);
+    }
+  }
+
+  async function uploadSerialFile(file?: File) {
+    if (!file) return;
+    const form = new FormData();
+    form.set("lineId", activeLineId);
+    form.set("file", file);
+    setBatchBusy(true);
+    try {
+      const response = await fetch(`/api/outbound/${activeOrderId}/serials/validate`, { method: "POST", body: form });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Serial upload failed.");
+      setSerialBatch(body.results.map((row: { serialNumber: string }) => row.serialNumber));
+      setBatchValidation(body);
+    } catch (error) {
+      setScanner((current) => ({
+        ...current,
+        feedback: { tone: "error", message: error instanceof Error ? error.message : "Serial upload failed." },
+      }));
+    } finally {
+      setBatchBusy(false);
+    }
+  }
+
+  async function confirmValidBatch() {
+    const valid = batchValidation?.results.filter((row) => row.valid).map((row) => row.serialNumber) ?? [];
+    if (!valid.length) return;
+    setBatchBusy(true);
+    try {
+      const response = await fetch(`/api/outbound/${activeOrderId}/serials/commit`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ lineId: activeLineId, serialNumbers: valid }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Batch confirmation failed.");
+      window.location.reload();
+    } catch (error) {
+      setScanner((current) => ({
+        ...current,
+        feedback: { tone: "error", message: error instanceof Error ? error.message : "Batch confirmation failed." },
+      }));
+      setBatchBusy(false);
+    }
   }
 
   return (
@@ -514,8 +653,53 @@ function OutboundDetail({
               <div className="scanner-progress">
                 <div><span>{t("scanner.required")}</span><strong>{line.requiredQty}</strong></div>
                 <div><span>{t("scanner.scanned")}</span><strong>{line.scannedSerials.length} / {line.requiredQty}</strong></div>
+                <div><span>Pending batch</span><strong>{serialBatch.length}</strong></div>
               </div>
               {scanner.feedback && <div className={`scan-feedback ${scanner.feedback.tone}`} aria-live="polite">{scanner.feedback.message}</div>}
+              <textarea
+                aria-label="Paste serial numbers"
+                placeholder="Paste Excel column, newline, comma or tab-separated serials"
+                value={pasteList}
+                onChange={(event) => setPasteList(event.target.value)}
+                rows={4}
+              />
+              <div className="scanner-row">
+                <Button type="button" onClick={addPastedSerials} disabled={!pasteList.trim() || batchBusy}>Add pasted list</Button>
+                <label className="btn">
+                  Upload CSV/XLSX
+                  <input
+                    type="file"
+                    accept=".csv,.txt,.xlsx"
+                    hidden
+                    onChange={(event) => uploadSerialFile(event.target.files?.[0])}
+                  />
+                </label>
+                <Button className="primary" type="button" onClick={() => validateBatch()} disabled={!serialBatch.length || batchBusy}>
+                  Validate {serialBatch.length}
+                </Button>
+              </div>
+              {batchValidation && (
+                <>
+                  <div className="notice">
+                    {batchValidation.summary.total} uploaded · {batchValidation.summary.valid} valid · {batchValidation.summary.invalid} need attention
+                  </div>
+                  <div className="table-wrap">
+                    <table>
+                      <thead><tr><th>SN</th><th>SKU</th><th>Location</th><th>Condition</th><th>Status</th><th>Result</th></tr></thead>
+                      <tbody>{batchValidation.results.map((row, index) => (
+                        <tr key={`${row.serialNumber}:${index}`}>
+                          <td className="mono">{row.serialNumber}</td><td>{row.sku ?? "—"}</td>
+                          <td>{row.location ?? "—"}</td><td>{row.condition ?? "—"}</td><td>{row.status ?? "—"}</td>
+                          <td><Badge tone={row.valid ? "teal" : "red"}>{row.valid ? "Valid" : row.code}</Badge><div className="subtle">{row.message}</div></td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                  <Button className="primary" type="button" onClick={confirmValidBatch} disabled={!batchValidation.summary.valid || batchBusy}>
+                    Confirm {batchValidation.summary.valid} valid SN
+                  </Button>
+                </>
+              )}
               <div className="serial-chips">
                 {line.scannedSerials.map((serial) => (
                   <span className="serial-chip" key={serial}>
@@ -1189,6 +1373,7 @@ function SerialSearchView({ state }: { state: WmsState }) {
   const { locale, t } = useI18n();
   const [draft, setDraft] = useState("");
   const [query, setQuery] = useState("");
+  const [remoteResults, setRemoteResults] = useState<SerialNumber[]>([]);
   const searchRef = useRef<HTMLInputElement>(null);
   const lastSearch = useRef<{ value: string; at: number } | undefined>(undefined);
   function submitSearch(event: FormEvent) {
@@ -1202,6 +1387,20 @@ function SerialSearchView({ state }: { state: WmsState }) {
     setDraft("");
     window.setTimeout(() => restoreScannerFocus(searchRef.current), 0);
   }
+  useEffect(() => {
+    if (!query) return;
+    const controller = new AbortController();
+    fetch(`/api/serials/search?q=${encodeURIComponent(query)}&limit=25`, { cache: "no-store", signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(t("common.loadFailed"));
+        const body = await response.json();
+        setRemoteResults(body.rows);
+      })
+      .catch((reason) => {
+        if (reason?.name !== "AbortError") setRemoteResults([]);
+      });
+    return () => controller.abort();
+  }, [query, t]);
   const results = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return [];
@@ -1217,7 +1416,7 @@ function SerialSearchView({ state }: { state: WmsState }) {
         ),
     );
   }, [query, state]);
-  const selected = results[0];
+  const selected = remoteResults[0] ?? results[0];
   const transactions = selected
     ? state.transactions.filter(
         (row) =>
@@ -1462,9 +1661,27 @@ function StocktakeView({ state, warehouse }: { state: WmsState; warehouse: "SYD"
 function AuditView({ state }: { state: WmsState }) {
   const { t } = useI18n();
   const [query, setQuery] = useState("");
-  const rows = state.audit.filter((row) =>
-    `${row.operation} ${row.actor} ${row.businessReference ?? ""} ${row.remark}`.toLowerCase().includes(query.toLowerCase()),
-  );
+  const [page, setPage] = useState(1);
+  const [auditPage, setAuditPage] = useState<{ rows: AuditEntry[]; total: number; totalPages: number }>({
+    rows: state.audit,
+    total: state.audit.length,
+    totalPages: 1,
+  });
+  useEffect(() => {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      const params = new URLSearchParams({ page: String(page), pageSize: "50" });
+      if (query) params.set("operation", query);
+      fetch(`/api/audit?${params}`, { cache: "no-store", signal: controller.signal })
+        .then(async (response) => {
+          if (!response.ok) throw new Error(t("common.loadFailed"));
+          setAuditPage(await response.json());
+        })
+        .catch(() => undefined);
+    }, 180);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [page, query, t]);
+  const rows = auditPage.rows;
   return (
     <>
       <PageHead title={t("title.audit")} subtitle={t("page.auditSubtitle")} />
@@ -1493,6 +1710,11 @@ function AuditView({ state }: { state: WmsState }) {
               ))}
             </tbody>
           </table>
+        </div>
+        <div className="toolbar">
+          <span className="subtle">{auditPage.total} rows · page {page} / {auditPage.totalPages || 1}</span>
+          <Button type="button" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>Previous</Button>
+          <Button type="button" disabled={page >= auditPage.totalPages} onClick={() => setPage((value) => value + 1)}>Next</Button>
         </div>
       </div>
     </>

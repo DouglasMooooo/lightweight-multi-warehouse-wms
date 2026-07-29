@@ -2,57 +2,70 @@
 
 import { AlertTriangle, ArrowRight, PackageCheck, Truck, Wrench } from "lucide-react";
 import Link from "next/link";
-import type { WarehouseCode, WmsState } from "@/domain/types";
+import { useEffect, useState } from "react";
+import type { WarehouseCode } from "@/domain/types";
 import { useI18n } from "@/i18n/provider";
-import { formatWarehouseTime, warehouseDateKey } from "@/lib/warehouse-time";
+import { formatWarehouseTime } from "@/lib/warehouse-time";
 import { PageHeader } from "@/components/shared/ui";
 
-export function DashboardPage({ state, warehouse }: { state: WmsState; warehouse: WarehouseCode }) {
+interface DashboardData {
+  warehouse: { code: string; timezone: string };
+  tasks: {
+    needsAllocation: number; allocated: number; prepared: number; readyForPickup: number;
+    outboundToday: number; faultyReturns: number; repairQueue: number; transfersInTransit: number;
+    exceptions: number; erpSyncFailures: number;
+  };
+  availableProduct: number;
+  inboundToday: number;
+  repairToday: number;
+  recentAudit: Array<{ id: string; operation: string; businessReference?: string; entityType?: string; at: string; actor: string }>;
+}
+
+export function DashboardPage({ warehouse }: { warehouse: WarehouseCode }) {
   const { locale, t } = useI18n();
-  const warehouseRecord = state.warehouses.find((row) => row.code === warehouse);
-  const timeZone = warehouseRecord?.timezone ?? "Australia/Sydney";
-  const today = warehouseDateKey(new Date(), timeZone);
-  const inventory = state.inventory.filter((row) => row.warehouseCode === warehouse);
-  const availableProduct = inventory
-    .filter((row) => row.itemType === "Product" && ["New", "Repair_Good"].includes(row.condition))
-    .reduce((sum, row) => sum + row.availableQty, 0);
-  const outboundToday = state.outboundOrders.filter(
-    (row) => row.warehouseCode === warehouse && row.outboundAt && warehouseDateKey(row.outboundAt, timeZone) === today,
-  ).length;
-  const inboundToday = state.transactions.filter(
-    (row) => row.warehouseCode === warehouse && row.type === "Inbound" && warehouseDateKey(row.effectiveAt ?? row.at, timeZone) === today,
-  ).reduce((sum, row) => sum + row.qty, 0);
-  const repairToday = (state.repairJobs ?? []).filter(
-    (row) => row.warehouseCode === warehouse && row.repairCompletedAt && warehouseDateKey(row.repairCompletedAt, timeZone) === today,
-  ).length;
-  const tasks = state.dashboardTasks;
+  const [data, setData] = useState<DashboardData>();
+  const [error, setError] = useState("");
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch(`/api/dashboard?warehouse=${encodeURIComponent(warehouse)}`, { cache: "no-store", signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(t("common.loadFailed"));
+        setData(await response.json());
+      })
+      .catch((reason) => { if (reason?.name !== "AbortError") setError(reason instanceof Error ? reason.message : t("common.loadFailed")); });
+    return () => controller.abort();
+  }, [t, warehouse]);
+  if (error) return <div className="notice error">{error}</div>;
+  if (!data) return <div className="loading-shell"><div className="loading-bar" /><div>{t("common.loading")}</div></div>;
+  const timeZone = data.warehouse.timezone;
+  const tasks = data.tasks;
   const primary = [
-    ["dashboard.needsAllocation", tasks?.needsAllocation ?? 0, "/outbound", "blue"],
-    ["dashboard.allocated", tasks?.allocated ?? 0, "/outbound", "blue"],
-    ["dashboard.prepared", tasks?.prepared ?? 0, "/outbound", "amber"],
-    ["dashboard.readyPickup", tasks?.readyForPickup ?? 0, "/outbound", "amber"],
-    ["dashboard.faultyReturns", tasks?.faultyReturns ?? 0, "/repair", "blue"],
-    ["dashboard.repairQueue", tasks?.repairQueue ?? 0, "/repair", "blue"],
-    ["dashboard.transfers", tasks?.transfersInTransit ?? 0, "/transfers", "amber"],
-    ["dashboard.exceptions", state.exceptions.filter((row) => row.status !== "Resolved").length, "/exceptions", "red"],
+    ["dashboard.needsAllocation", tasks.needsAllocation, "/outbound", "blue"],
+    ["dashboard.allocated", tasks.allocated, "/outbound", "blue"],
+    ["dashboard.prepared", tasks.prepared, "/outbound", "amber"],
+    ["dashboard.readyPickup", tasks.readyForPickup, "/outbound", "amber"],
+    ["dashboard.faultyReturns", tasks.faultyReturns, "/repair", "blue"],
+    ["dashboard.repairQueue", tasks.repairQueue, "/repair", "blue"],
+    ["dashboard.transfers", tasks.transfersInTransit, "/transfers", "amber"],
+    ["dashboard.exceptions", tasks.exceptions, "/exceptions", "red"],
   ] as const;
   const secondary = [
-    ["dashboard.outboundToday", outboundToday],
-    ["dashboard.inboundToday", inboundToday],
-    ["dashboard.repairToday", repairToday],
-    ["dashboard.availableProduct", availableProduct],
+    ["dashboard.outboundToday", tasks.outboundToday],
+    ["dashboard.inboundToday", data.inboundToday],
+    ["dashboard.repairToday", data.repairToday],
+    ["dashboard.availableProduct", data.availableProduct],
   ] as const;
   const attention = [
-    tasks?.needsAllocation
+    tasks.needsAllocation
       ? { text: t("dashboard.ordersNeedAllocation", { count: tasks.needsAllocation }), href: "/outbound" }
       : null,
-    tasks?.repairQueue
+    tasks.repairQueue
       ? { text: t("dashboard.repairsWaiting", { count: tasks.repairQueue }), href: "/repair" }
       : null,
-    state.exceptions.some((row) => row.status !== "Resolved")
+    tasks.exceptions
       ? {
           text: t("dashboard.exceptionsOpen", {
-            count: state.exceptions.filter((row) => row.status !== "Resolved").length,
+            count: tasks.exceptions,
           }),
           href: "/exceptions",
         }
@@ -91,7 +104,7 @@ export function DashboardPage({ state, warehouse }: { state: WmsState; warehouse
         <section className="panel">
           <div className="panel-head"><h3>{t("dashboard.recentActivity")}</h3><Link className="subtle" href="/audit">{t("nav.audit")}</Link></div>
           <div className="panel-body timeline">
-            {state.audit.slice(0, 6).map((row) => (
+            {data.recentAudit.map((row) => (
               <div className="timeline-item" key={row.id}><strong>{row.operation}</strong><p>{row.businessReference ?? row.entityType} · {formatWarehouseTime(row.at, locale, timeZone)}</p></div>
             ))}
           </div>

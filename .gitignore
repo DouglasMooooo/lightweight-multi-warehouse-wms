@@ -11,3 +11,4 @@ generated/
 *.log
 *.tsbuildinfo
 !.env.example
+tests/fixtures/private/
