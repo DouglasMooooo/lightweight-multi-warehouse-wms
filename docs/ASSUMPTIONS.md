@@ -47,3 +47,13 @@ Until explicit cutover approval, the workbook remains the production operational
 - Seventeen Outbound actions lack `Outbound_Date`. They remain reference evidence and do not create an invented physical dispatch timestamp.
 - Weekly/monthly date-only values follow `Australia/Sydney`; observed Google Sheet `America/Los_Angeles` metadata is not inherited.
 - Vercel Preview functions are currently configured for `iad1` while the Neon Preview database is in Sydney. This mismatch is documented and must not be changed in production without a controlled comparison.
+
+## Sprint 4 operational hardening decisions
+
+- Faulty receiving preserves a known serial identity. A known WMS serial is automatically receivable only when its current lifecycle proves it is physically outbound; physically present, Prepared, Repair or otherwise ambiguous statuses require Manual Review so receiving cannot double-increase Physical Qty.
+- An unknown faulty serial can be registered only when ERP or explicit operator input identifies the SKU. ERP misses without an identified SKU remain Manual Review; the system never guesses from the serial text.
+- Native repair completion remains valid only from `In_Repair` and must use the normal RepairJob lifecycle. Bulk legacy Repair-Good recognition rejects an active normal RepairJob, requires an explicit reason, and never fabricates an unknown serial number.
+- Bulk operations use a UUID-backed human-readable batch reference. It is traceability for inbound, faulty receipt and audit, not a new generic batch-management subsystem.
+- Bulk New Inbound creates one high-level inventory transaction and audit operation with all supplied serial identities. Bind Existing Stock creates identities only and cannot increase Physical Qty.
+- The IAD1/SYD1 A/B test used isolated Vercel Preview deployments and read-only requests. Production was not changed. The dedicated Preview database remained the data source, and no shadow migration was rerun.
+- Preview functions are now explicitly configured for `syd1`, matching the Sydney Neon Preview database. This is a Preview evidence-based change, not authorization to change Production.

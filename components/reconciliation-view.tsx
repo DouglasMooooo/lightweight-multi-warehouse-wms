@@ -104,7 +104,7 @@ export function ReconciliationView({ warehouse }: { warehouse: Warehouse }) {
         subtitle={t("reconciliation.subtitle")}
         badge={<StatusBadge code="Pending" label={t("reconciliation.shadowMode")} tone="neutral" />}
       />
-      <ol className="workflow-steps" aria-label="Reconciliation workflow">
+      <ol className="workflow-steps" aria-label={t("reconciliation.workflow")}>
         {[t("reconciliation.upload"), t("reconciliation.cutover"), t("reconciliation.run"), t("reconciliation.review"), t("reconciliation.export")]
           .map((label, index) => <li className={result && index >= 3 ? "done" : index <= 2 ? "active" : ""} key={label}><span>{index + 1}</span>{label}</li>)}
       </ol>

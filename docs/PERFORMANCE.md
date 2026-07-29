@@ -1,56 +1,64 @@
 # Performance
 
-Measured 2026-07-29. Timings are observations, not guarantees.
+Measured on Vercel Preview on 2026-07-30. Timings are observations, not guarantees.
 
-## Before
+## Root cause
 
-The deployed Preview at commit `6876940` used `GET /api/wms` for normal startup and returned nearly every domain collection plus up to 500 transactions, audits and exceptions.
+Before Sprint 4, Vercel Functions ran in `iad1` (Washington, D.C.) while the dedicated Preview Neon database ran in Sydney. Database-heavy requests therefore crossed an intercontinental path. Normal pages also depended on an oversized `GET /api/wms` snapshot, which returned unrelated collections and made command responses scale with total warehouse data.
 
-| Measurement | Result |
-| --- | ---: |
-| Warm deployed `GET /api/wms` navigation | 4,946 ms |
-| Real workbook DRY_RUN end-to-end | 27,937 ms |
-| Command response | Full WMS snapshot |
-| SN scan | One write followed by a full snapshot |
+Sprint 4 aligned Preview Functions to `syd1`, split bounded page queries, reduced bootstrap data to the current user and warehouses, cached one Prisma client and `pg` pool per warm runtime, and instrumented safe route-level duration, response size and row count.
 
-The browser measurement includes network, function and database work. DRY_RUN includes upload, parsing, PostgreSQL reference reads, reconciliation and rendering.
+Production was not reconfigured or deployed.
 
-## Changes
+## Deployed A/B method
 
-- Dashboard uses aggregate/count queries and six recent audit rows.
-- Inventory is server-paginated (page size capped at 100) with search and filters.
-- Outbound queue/history are paginated; detail reads one order plus bounded candidate balances.
-- SN search is server-side and bounded; all serials are no longer preloaded.
-- Audit and transactions have dedicated paginated endpoints.
-- Timing logs contain route, duration, query name, safe row count and environment—never row/SN contents.
-- Normal command responses are small; outbound detail refreshes only the affected query.
-- Bulk validation uses one `IN (...)` serial read and one `IN (...)` active-allocation read.
-- PrismaClient and its `pg` pool are cached per warm runtime. `DATABASE_POOL_MAX` defaults to 5 on Vercel and 10 elsewhere.
+- Before control: commit `36d7124`, Vercel Preview functions verified as `IAD1`.
+- After candidate: commit `c3bb7ec`, Vercel Preview functions verified as `SYD1`.
+- Five warm invocations were sampled for each route from actual Vercel runtime logs.
+- The cold/first observation is reported separately and excluded from warm statistics.
+- The old control did not emit response-size instrumentation, so before sizes are intentionally reported as unavailable.
+- Requests were read-only and used a guaranteed-miss SN query; no warehouse data was changed.
+- Values below are server operation durations from application telemetry, not browser navigation time.
 
-## Vercel / Database
+## Before and after
 
-| Component | Finding |
-| --- | --- |
-| Project | `syd-wms-preview` |
-| Vercel function region | `iad1` (Washington, D.C.) |
-| Compute | Fluid Compute enabled |
-| PostgreSQL | Neon Free |
-| PostgreSQL region | Sydney (`syd1`) |
-| Application URL | pooled `DATABASE_URL` |
-| Migrations | `DATABASE_URL_UNPOOLED` |
+| Route | Before IAD1 warm median | Before p95 | After SYD1 warm median | After p95 | After fastest–slowest | After cold | After bytes / rows |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `GET /api/bootstrap` | 445 ms | 447 ms | 5 ms | 5 ms | 5–5 ms | 6 ms | 798 B |
+| `GET /api/dashboard` | 1,064 ms | 1,913 ms | 18 ms | 26 ms | 17–26 ms | 39 ms | 524 B |
+| `GET /api/inventory?page=1&pageSize=50` | 639 ms | 844 ms | 13 ms | 26 ms | 11–26 ms | 57 ms | 13,958 B / 50 |
+| `GET /api/outbound` | 632 ms | 1,049 ms | 9 ms | 10 ms | 8–10 ms | 33 ms | 6,929 B / 12 |
+| `GET /api/serials/search?q=PERF-NOT-FOUND` | 445 ms | 445 ms | 6 ms | 7 ms | 6–7 ms | 41 ms | 11 B / 0 |
 
-Compute and database are not aligned. The current deployment does not expose an isolated network RTT, so no synthetic latency is claimed. The measured DB-heavy 4.946 s snapshot and 27.937 s reconciliation include the inter-region path. Test `syd1` functions in Preview before any production resource change.
+The observed warm median reduction was approximately 98.0%–98.9% across the sampled routes. This large change is consistent with removing the cross-region database path and splitting oversized reads; it is not attributed to one isolated SQL change.
 
-## After
+Historical context: the old warm browser navigation to `GET /api/wms` was measured at 4,946 ms, and a real workbook DRY_RUN at 27,937 ms. Those are different workloads and are not presented as direct route-for-route A/B results.
 
-The new endpoints have not yet been deployed, so deployed after-timings are not fabricated. The next isolated Preview deployment must measure:
+## Endpoint and response changes
 
-| Endpoint | Target |
-| --- | ---: |
-| Dashboard warm | < 1,000 ms |
-| Inventory first page warm | < 1,000 ms |
-| Outbound active queue warm | < 1,000 ms |
-| Exact/prefix SN search | < 500 ms where practical |
-| Command | Independent of total row count |
+- Dashboard uses aggregates and six recent audit rows.
+- Inventory is server-paginated and capped at 100 rows per page.
+- Outbound queue/history and detail are separate bounded reads.
+- SN search is server-side and bounded.
+- Repair has a paginated query supporting status, SKU/model, SN and received-date filters.
+- Receiving, Repair, Move, Adjustment, Transfers, Stocktake, Exceptions, Admin and Bulk SN no longer need a full snapshot for their normal page load.
+- Bulk validation performs set-based serial and allocation reads.
+- Normal command responses refresh only the affected resource.
+- Instrumentation records `route`, `durationMs`, `responseBytes`, `queryName`, safe `rows`, and environment; it never logs row contents or serial numbers.
 
-Remaining bottlenecks are the inter-region path, Neon Free cold starts, workbook formula parsing and large reconciliation result sets.
+## Pooling and indexes
+
+The application uses the pooled Neon `DATABASE_URL`; migrations use `DATABASE_URL_UNPOOLED`. A cached Prisma client owns a cached `pg` pool per warm runtime. `DATABASE_POOL_MAX` defaults to 5 on Vercel and 10 elsewhere.
+
+Query review confirmed existing coverage for the measured access patterns: unique SN, unique SKU, location/warehouse, unique SH number, outbound/repair statuses, inventory balance grain, audit business reference, and transaction reference/effective time. No speculative index was added.
+
+## Remaining performance risks
+
+- Neon Free and Vercel can still cold-start after idle periods; cold and warm results must continue to be tracked separately.
+- Workbook parsing and reconciliation remain larger workloads than operator page reads.
+- The legacy `GET /api/wms` read endpoint remains for compatibility and label fallback; normal operator pages should not add new dependencies on it.
+- Response-size baselines still need to be accumulated for outbound detail, repair and bulk-validation requests using representative but non-sensitive operator activity.
+
+## Hosting recommendation
+
+Keep Vercel + Neon. With both in Sydney and bounded queries, all measured warm medians are comfortably below the Sprint 4 targets. There is no performance evidence supporting a hosting migration at this time.

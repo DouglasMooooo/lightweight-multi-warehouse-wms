@@ -132,13 +132,13 @@ export function WmsApp({ path }: { path: string[] }) {
       setToast({ message: success });
       return true;
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Operation failed.", error: true });
+      setToast({ message: error instanceof Error ? error.message : t("error.UNKNOWN"), error: true });
       return false;
     }
   }
 
   async function resetDemo() {
-    await commit({ type: "resetDemo" }, "Demo database restored to the validated starting state.");
+    await commit({ type: "resetDemo" }, t("success.demoReset"));
   }
 
   if (!ready) return <div className="loading-shell"><div className="loading-bar" /><div>{t("common.loading")}</div></div>;
@@ -261,14 +261,14 @@ function OutboundList({
               if (!importSh.trim()) return;
               const accepted = await commit(
                 { type: "importOutbound", shNo: importSh.trim().toUpperCase() },
-                `${importSh.trim().toUpperCase()} imported as Pending Allocation; no stock frozen.`,
+                t("success.outboundImported", { sh: importSh.trim().toUpperCase() }),
               );
                if (accepted) setImportSh("");
             }}
           >
             <input
-              aria-label="SH number to import"
-              placeholder="Try SH-2607-00175722"
+              aria-label={t("outbound.importSh")}
+              placeholder={t("outbound.importExample")}
               value={importSh}
               onChange={(event) => setImportSh(event.target.value.toUpperCase())}
             />
@@ -353,7 +353,7 @@ function OutboundDetail({
   commit: (command: WmsCommand, success: string) => Promise<boolean>;
   refresh: () => Promise<void>;
 }) {
-  const { t } = useI18n();
+  const { t, error: friendlyError } = useI18n();
   const order = state.outboundOrders.find((row) => row.id === orderId);
   const [activeLineId, setActiveLineId] = useState(order?.lines.at(0)?.id ?? "");
   const [scanner, setScanner] = useState<ScannerState>({ value: "", inFlight: false });
@@ -381,7 +381,7 @@ function OutboundDetail({
       setActiveLineId(order.lines.at(0)!.id);
   }, [activeLineId, order]);
   const line = order?.lines.find((row) => row.id === activeLineId) ?? order?.lines.at(0);
-  if (!order || !line) return <Empty label="Outbound order not found." />;
+  if (!order || !line) return <Empty label={t("common.orderNotFound")} />;
   const candidates = state.inventory.filter(
     (row) =>
       row.warehouseCode === order.warehouseCode &&
@@ -549,7 +549,7 @@ function OutboundDetail({
                   pickup: order.pickupCode ?? "—",
                   units,
                 }))) return;
-                commit({ type: "dispatchOutbound", orderId: order.id }, `${order.shNo} dispatched; ERP sync queued.`);
+                commit({ type: "dispatchOutbound", orderId: order.id }, t("success.outboundDispatched", { sh: order.shNo }));
               }}
             >
               <Truck /> {t("outbound.confirmDispatch")}
@@ -564,7 +564,7 @@ function OutboundDetail({
                     lineId: line.id,
                     allocationIds: line.allocations.filter((row) => !row.preparedAt).map((row) => row.id),
                   },
-                  `${order.shNo} physical preparation confirmed; frozen stock updated.`,
+                  t("success.outboundPrepared", { sh: order.shNo }),
                 )
               }
             >
@@ -574,9 +574,9 @@ function OutboundDetail({
         }
       />
       <div className="stepbar">
-        {["ERP order", "Allocated", "Prepared", "SN scanned", "Dispatched"].map((label, index) => (
-          <div className={cn("step", index + 1 <= step && "done")} key={label}>
-            {label}
+        {["outbound.step.erp", "outbound.step.allocated", "outbound.step.prepared", "outbound.step.sn", "outbound.step.dispatched"].map((key, index) => (
+          <div className={cn("step", index + 1 <= step && "done")} key={key}>
+            {t(key)}
           </div>
         ))}
       </div>
@@ -662,11 +662,14 @@ function OutboundDetail({
                             locationCode: row.locationCode,
                             qty: Math.min(row.availableQty, line.requiredQty - line.allocatedQty),
                           },
-                          `${Math.min(row.availableQty, line.requiredQty - line.allocatedQty)} units allocated at ${row.locationCode}; physical and frozen quantities unchanged.`,
+                          t("success.outboundAllocated", {
+                            count: Math.min(row.availableQty, line.requiredQty - line.allocatedQty),
+                            location: row.locationCode,
+                          }),
                         )
                       }
                     >
-                      <PackageCheck /> Allocate
+                      <PackageCheck /> {t("common.allocate")}
                     </Button>
                   </div>
                 ))}
@@ -700,7 +703,7 @@ function OutboundDetail({
               </div>
               {scanner.feedback && <div className={`scan-feedback ${scanner.feedback.tone}`} aria-live="polite">{scanner.feedback.message}</div>}
               <textarea
-                aria-label="Paste serial numbers"
+                aria-label={t("bulk.serialNumbers")}
                 placeholder={t("outbound.pastePlaceholder")}
                 value={pasteList}
                 onChange={(event) => setPasteList(event.target.value)}
@@ -718,13 +721,17 @@ function OutboundDetail({
                   />
                 </label>
                 <Button className="primary" type="button" onClick={() => validateBatch()} disabled={!serialBatch.length || batchBusy}>
-                  Validate {serialBatch.length}
+                  {t("bulk.validate")} {serialBatch.length}
                 </Button>
               </div>
               {batchValidation && (
                 <>
                   <div className="notice">
-                    {batchValidation.summary.total} uploaded · {batchValidation.summary.valid} valid · {batchValidation.summary.invalid} need attention
+                    {t("bulk.validationSummary", {
+                      total: batchValidation.summary.total,
+                      valid: batchValidation.summary.valid,
+                      invalid: batchValidation.summary.invalid,
+                    })}
                   </div>
                   <div className="table-wrap">
                     <table>
@@ -734,7 +741,9 @@ function OutboundDetail({
                           <td className="mono">{row.serialNumber}</td><td>{row.sku ?? "—"}</td>
                           <td>{row.location ?? "—"}</td><td>{row.condition ?? "—"}</td><td>{row.status ?? "—"}</td>
                           <td>
-                            <Badge tone={row.valid ? "teal" : "red"}>{row.valid ? "Valid" : row.code}</Badge>
+                            <Badge tone={row.valid ? "teal" : "red"}>
+                              {row.valid ? t("bulk.result.VALID") : friendlyError(row.code, row.message)}
+                            </Badge>
                             <div className="subtle">{row.message}</div>
                             {row.canRegisterAndAssign && (
                               <label className="checkbox-row">
@@ -747,7 +756,7 @@ function OutboundDetail({
                                       : current.filter((value) => value !== row.serialNumber),
                                   )}
                                 />
-                                Register and Assign
+                                {t("outbound.registerAndAssign")}
                               </label>
                             )}
                           </td>
@@ -761,7 +770,7 @@ function OutboundDetail({
                     onClick={confirmValidBatch}
                     disabled={batchValidation.summary.valid + registerUnknown.length === 0 || batchBusy}
                   >
-                    Confirm {batchValidation.summary.valid + registerUnknown.length} SN
+                    {t("outbound.confirmSn", { count: batchValidation.summary.valid + registerUnknown.length })}
                   </Button>
                 </>
               )}
@@ -784,20 +793,20 @@ function OutboundDetail({
               <h3>{t("outbound.orderSummary")}</h3>
             </div>
             <div className="panel-body summary-list">
-              <Summary label="SH No" value={order.shNo} mono />
-              <Summary label="Pickup code" value={order.pickupCode ?? "Generated when fully prepared"} mono />
-              <Summary label="ERP warehouse" value={order.erpWarehouse} />
-              <Summary label="Physical warehouse" value={order.warehouseCode} />
-              <Summary label="Allocation" value={line.allocationLocation ?? t("common.notAllocated")} />
+              <Summary label="SH" value={order.shNo} mono />
+              <Summary label={t("summary.pickupCode")} value={order.pickupCode ?? t("outbound.pickupWhenPrepared")} mono />
+              <Summary label={t("summary.erpWarehouse")} value={order.erpWarehouse} />
+              <Summary label={t("summary.physicalWarehouse")} value={order.warehouseCode} />
+              <Summary label={t("summary.allocation")} value={line.allocationLocation ?? t("common.notAllocated")} />
               <Summary
-                label="Allocation detail"
+                label={t("summary.allocationDetail")}
                 value={
                   line.allocations.length
                     ? line.allocations.map((row) => `${row.locationCode} × ${row.quantity}`).join("; ")
-                    : "Not allocated"
+                    : t("common.notAllocated")
                 }
               />
-              <Summary label="ERP sync" value={order.erpSyncStatus} />
+              <Summary label={t("summary.erpSync")} value={order.erpSyncStatus} />
             </div>
           </div>
           {line.preparedQty > 0 && (
@@ -896,12 +905,12 @@ function ReceivingView({
         {tab === "Standard Inbound" && (
           <form className="panel-body" onSubmit={receive}>
             <div className="form-grid">
-              <Field label="Warehouse">
+              <Field label={t("field.warehouse")}>
                 <select disabled>
                   <option>{state.warehouses.find((row) => row.code === "SYD")?.code} · {state.warehouses.find((row) => row.code === "SYD")?.name}</option>
                 </select>
               </Field>
-              <Field label="Destination location">
+              <Field label={t("field.destinationLocation")}>
                 <select name="location" defaultValue="FLEX-01">
                   {state.locations
                     .filter((row) => row.warehouseCode === "SYD")
@@ -919,20 +928,20 @@ function ReceivingView({
                   ))}
                 </select>
               </Field>
-              <Field label="Condition">
+              <Field label={t("field.condition")}>
                 <select name="condition" defaultValue="New">
                   <option value="New">{t("status.New")}</option>
                   <option value="Repair_Good">{t("status.Repair_Good")}</option>
                   <option value="Material">{t("status.Material")}</option>
                 </select>
               </Field>
-              <Field label="Quantity">
+              <Field label={t("field.quantity")}>
                 <input name="qty" type="number" min="1" defaultValue="1" />
               </Field>
-              <Field label="Serial number" help={t("receiving.traceableHelp")}>
+              <Field label={t("field.serialNumber")} help={t("receiving.traceableHelp")}>
                 <input name="serial" placeholder={t("receiving.scanPlaceholder")} />
               </Field>
-              <Field label="Remark" full>
+              <Field label={t("field.remark")} full>
                 <textarea name="remark" defaultValue="Standard ERP inbound receipt." />
               </Field>
             </div>
@@ -1084,12 +1093,12 @@ function RepairView({
                   {t("repair.erpFound")}
                 </div>
                 <div className="summary-list">
-                  <Summary label="Serial number" value={record.serialNumber} mono />
-                  <Summary label="Related SH" value={record.relatedShNo} mono />
+                  <Summary label={t("field.serialNumber")} value={record.serialNumber} mono />
+                  <Summary label={t("summary.relatedSH")} value={record.relatedShNo} mono />
                   <Summary label="SKU" value={record.sku} mono />
-                  <Summary label="Model" value={record.model} />
-                  <Summary label="Original outbound" value={record.originalOutboundDate} />
-                  <Summary label="ERP status" value={record.erpStatus} />
+                  <Summary label={t("common.model")} value={record.model} />
+                  <Summary label={t("summary.originalOutbound")} value={record.originalOutboundDate} />
+                  <Summary label={t("summary.erpStatus")} value={record.erpStatus} />
                 </div>
                 <div className="form-actions">
                   <Button
@@ -1097,7 +1106,7 @@ function RepairView({
                     onClick={() =>
                       commit(
                         { type: "receiveFaulty", serialNumber: record.serialNumber },
-                        `${record.serialNumber} received to REPAIR-01 with status Repair.`,
+                        t("success.faultyReceived", { sn: record.serialNumber }),
                       )
                     }
                   >
@@ -1113,12 +1122,12 @@ function RepairView({
             <h3>{t("repair.receivingPolicy")}</h3>
           </div>
           <div className="panel-body summary-list">
-            <Summary label="Default warehouse" value="SYD" />
-            <Summary label="Default location" value="REPAIR-01" />
-            <Summary label="Inventory condition" value={<StatusBadge code="Repair" />} />
-            <Summary label="SN status" value={<StatusBadge code="Repair" />} />
-            <Summary label="Transaction" value="Return_to_Repair" />
-            <Summary label="Faulty receipts recorded" value={state.faultyReceivedCount} />
+            <Summary label={t("summary.defaultWarehouse")} value="SYD" />
+            <Summary label={t("summary.defaultLocation")} value="REPAIR-01" />
+            <Summary label={t("summary.inventoryCondition")} value={<StatusBadge code="Repair" />} />
+            <Summary label={t("summary.snStatus")} value={<StatusBadge code="Repair" />} />
+            <Summary label={t("summary.transaction")} value="Return_to_Repair" />
+            <Summary label={t("summary.faultyReceipts")} value={state.faultyReceivedCount} />
           </div>
         </div>
       </div>
@@ -1130,7 +1139,7 @@ function RepairView({
         <div className="panel-body grid">
           {(state.repairJobs ?? []).map((job) => (
             <div className="allocation-card" key={job.id}>
-              <div className="strong mono">{job.serialNumber ?? "Unknown legacy SN"}</div>
+              <div className="strong mono">{job.serialNumber ?? t("repair.unknownLegacySn")}</div>
               <div className="subtle">{job.model} · {job.status} · {job.currentLocation}</div>
               <Button
                 disabled={!["Received", "Pending_Repair"].includes(job.status)}
@@ -1141,7 +1150,7 @@ function RepairView({
                       repairJobId: job.id,
                       remark: "Warehouse repair work started.",
                     },
-                    `${job.serialNumber ?? job.sku} moved to In Repair.`,
+                    t("success.repairStarted", { item: job.serialNumber ?? job.sku }),
                   )
                 }
               >
@@ -1160,7 +1169,7 @@ function RepairView({
                       outcome: "Repair_Good",
                       remark: "Technician repair completed; returned to serviceable stock.",
                     },
-                    `${job.serialNumber ?? job.sku} completed as Repair_Good at FLEX-01.`,
+                    t("success.repairCompleted", { item: job.serialNumber ?? job.sku }),
                   );
                 }}
               >
@@ -1205,7 +1214,7 @@ function MoveView({
           qty: Number(data.get("qty")),
           remark: String(data.get("remark")),
       },
-      "Move completed atomically. Warehouse total is unchanged.",
+      t("success.move"),
     );
   }
   const product = state.products.find((row) => row.sku === "10-105-00346-00");
@@ -1223,7 +1232,7 @@ function MoveView({
           </div>
           <div className="panel-body">
             <div className="form-grid">
-              <Field label="Warehouse">
+              <Field label={t("field.warehouse")}>
                 <input value={state.warehouses.find((row) => row.code === "SYD")?.name ?? "SYD"} readOnly />
               </Field>
               <Field label="SKU">
@@ -1235,7 +1244,7 @@ function MoveView({
                   ))}
                 </select>
               </Field>
-              <Field label="From location">
+              <Field label={t("field.fromLocation")}>
                 <select name="from" defaultValue="R1-4-2-L">
                   {state.locations
                     .filter((row) => row.warehouseCode === "SYD")
@@ -1244,7 +1253,7 @@ function MoveView({
                     ))}
                 </select>
               </Field>
-              <Field label="To location">
+              <Field label={t("field.toLocation")}>
                 <select name="to" defaultValue="FLEX-01">
                   {state.locations
                     .filter((row) => row.warehouseCode === "SYD")
@@ -1253,7 +1262,7 @@ function MoveView({
                     ))}
                 </select>
               </Field>
-              <Field label="Condition">
+              <Field label={t("field.condition")}>
                 <select name="condition" defaultValue="Material">
                   <option value="Material">{t("status.Material")}</option>
                   <option value="New">{t("status.New")}</option>
@@ -1261,10 +1270,10 @@ function MoveView({
                   <option value="Repair">{t("status.Repair")}</option>
                 </select>
               </Field>
-              <Field label="Quantity">
+              <Field label={t("field.quantity")}>
                 <input name="qty" type="number" min="1" defaultValue="10" />
               </Field>
-              <Field label="Remark" full>
+              <Field label={t("field.remark")} full>
                 <textarea name="remark" defaultValue="Replenishment move from rack to FLEX staging." />
               </Field>
             </div>
@@ -1283,7 +1292,7 @@ function MoveView({
             <Summary label="SKU" value={product?.sku ?? "—"} mono />
             <Summary label="Model" value={product?.model ?? "—"} />
             <Summary
-              label="Available at R1-4-2-L"
+              label={t("move.availableAt", { location: "R1-4-2-L" })}
               value={
                 state.inventory.find(
                   (row) => row.locationCode === "R1-4-2-L" && row.sku === "10-105-00346-00",
@@ -1326,7 +1335,7 @@ function AdjustmentView({
           reason: String(data.get("reason")),
           remark: String(data.get("remark")),
       },
-      "Adjustment transaction recorded and current stock updated.",
+      t("success.adjustment"),
     );
   }
   return (
@@ -1340,22 +1349,22 @@ function AdjustmentView({
           </div>
           <div className="panel-body">
             <div className="form-grid">
-              <Field label="Direction">
+              <Field label={t("field.direction")}>
                 <select name="direction">
                   <option value="In">{t("operation.in")}</option>
                   <option value="Out">{t("operation.out")}</option>
                 </select>
               </Field>
-              <Field label="Warehouse">
+              <Field label={t("field.warehouse")}>
                 <input value="SYD" readOnly />
               </Field>
-              <Field label="Item type">
+              <Field label={t("field.itemType")}>
                 <select name="itemType" defaultValue="Material">
                   <option value="Material">{t("status.Material")}</option>
                   <option value="Product">{t("status.Product")}</option>
                 </select>
               </Field>
-              <Field label="Location">
+              <Field label={t("field.location")}>
                 <select name="location" defaultValue="R1-4-3-L">
                   {state.locations
                     .filter((row) => row.warehouseCode === "SYD")
@@ -1364,7 +1373,7 @@ function AdjustmentView({
                     ))}
                 </select>
               </Field>
-              <Field label="SKU" help="May be omitted only for controlled unmonitored Material.">
+              <Field label="SKU" help={t("adjustment.skuHelp")}>
                 <select name="sku" defaultValue="20-012-10219-08" disabled={noSku}>
                   {state.products.map((row) => (
                     <option value={row.sku} key={row.id}>
@@ -1377,7 +1386,7 @@ function AdjustmentView({
                   Unmonitored no-SKU material
                 </label>
               </Field>
-              <Field label="Condition">
+              <Field label={t("field.condition")}>
                 <select name="condition" defaultValue="Material">
                   <option value="Material">{t("status.Material")}</option>
                   <option value="New">{t("status.New")}</option>
@@ -1386,10 +1395,10 @@ function AdjustmentView({
                   <option value="Scrap">{t("status.Scrap")}</option>
                 </select>
               </Field>
-              <Field label="Quantity">
+              <Field label={t("field.quantity")}>
                 <input name="qty" type="number" min="1" defaultValue="12" />
               </Field>
-              <Field label="Reason">
+              <Field label={t("field.reason")}>
                 <select name="reason" defaultValue={noSku ? "Unmonitored material" : "Count correction"}>
                   <option value="Count correction">{t("reason.countCorrection")}</option>
                   <option value="Repair completion">{t("reason.repairCompletion")}</option>
@@ -1397,7 +1406,7 @@ function AdjustmentView({
                   <option value="Unmonitored material">{t("reason.unmonitoredMaterial")}</option>
                 </select>
               </Field>
-              <Field label="Remark" full>
+              <Field label={t("field.remark")} full>
                 <textarea name="remark" defaultValue="Supervisor-approved stock correction." />
               </Field>
             </div>
@@ -1498,7 +1507,7 @@ function SerialSearchView({ state }: { state: WmsState }) {
           <Search /> Trace inventory
         </div>
         <div className="scanner-row">
-          <input ref={searchRef} autoFocus autoComplete="off" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="SN, SH, Pickup Code or SKU → Enter" />
+          <input ref={searchRef} autoFocus autoComplete="off" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder={t("scanner.searchPlaceholder")} />
           <Button className="primary" type="submit">{t("common.search")}</Button>
         </div>
       </form>
@@ -1511,12 +1520,12 @@ function SerialSearchView({ state }: { state: WmsState }) {
             </div>
             <div className="panel-body summary-list">
               <Summary label="SKU" value={selected.sku} mono />
-              <Summary label="Model" value={selected.model} />
-              <Summary label="Warehouse" value={selected.warehouseCode ?? t("common.outsideWms")} />
-              <Summary label="Location" value={selected.locationCode ?? "—"} />
-              <Summary label="Condition" value={<StatusBadge code={selected.condition} />} />
-              <Summary label="Related SH" value={selected.relatedShNo ?? "—"} mono />
-              <Summary label="Related transfer" value={selected.relatedTransferNo ?? "—"} mono />
+              <Summary label={t("common.model")} value={selected.model} />
+              <Summary label={t("common.warehouse")} value={selected.warehouseCode ?? t("common.outsideWms")} />
+              <Summary label={t("common.location")} value={selected.locationCode ?? "—"} />
+              <Summary label={t("common.condition")} value={<StatusBadge code={selected.condition} />} />
+              <Summary label={t("summary.relatedSH")} value={selected.relatedShNo ?? "—"} mono />
+              <Summary label={t("summary.relatedTransfer")} value={selected.relatedTransferNo ?? "—"} mono />
             </div>
           </div>
           <div className="panel">
@@ -1620,7 +1629,7 @@ function TransferView({
                           }))) return;
                           commit(
                             { type: "dispatchTransfer", transferId: transfer.id },
-                            `${transfer.transferNo} dispatched; serial now In Transit.`,
+                            t("success.transferDispatched", { transfer: transfer.transferNo }),
                           );
                         }}
                       >
@@ -1633,7 +1642,7 @@ function TransferView({
                         onClick={() =>
                           commit(
                             { type: "receiveTransfer", transferId: transfer.id, destinationLocation: "M1-1-1-L" },
-                            `${transfer.transferNo} received into MEL at M1-1-1-L.`,
+                            t("success.transferReceived", { transfer: transfer.transferNo }),
                           )
                         }
                       >
@@ -1708,7 +1717,7 @@ function StocktakeView({ state, warehouse }: { state: WmsState; warehouse: "SYD"
                         min="0"
                         value={counted ?? ""}
                         onChange={(event) => setCounts((current) => ({ ...current, [row.id]: event.target.value }))}
-                        placeholder="Count"
+                        placeholder={t("common.counting")}
                       />
                     </td>
                     <td className="number strong">{variance ?? "—"}</td>
