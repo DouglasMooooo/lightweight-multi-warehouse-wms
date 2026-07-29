@@ -1,3 +1,4 @@
 {
-  "buildCommand": "pnpm vercel-build"
+  "buildCommand": "pnpm vercel-build",
+  "regions": ["syd1"]
 }

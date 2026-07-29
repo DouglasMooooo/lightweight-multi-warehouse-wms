@@ -108,7 +108,7 @@ export function AppShell({
         <div className="brand">
           <div className="brand-mark">FX</div>
           <div><strong>{t("app.name")}</strong><span>{t("app.version")} · v0.1</span></div>
-          {sidebarOpen && <Button className="ghost mobile-menu" onClick={() => setSidebarOpen(false)} aria-label="Close navigation"><X /></Button>}
+          {sidebarOpen && <Button className="ghost mobile-menu" onClick={() => setSidebarOpen(false)} aria-label={t("common.closeNavigation")}><X /></Button>}
         </div>
         {nav.map((group) => (
           <div key={group.label}>
@@ -124,14 +124,14 @@ export function AppShell({
           </div>
         ))}
         <div className="sidebar-foot">
-          <div className="user-chip"><div className="avatar">{(currentUser?.displayName ?? "User").split(/\s+/).map((part) => part[0]).join("").slice(0, 2)}</div><div><strong>{currentUser?.displayName ?? "Warehouse User"}</strong><span>{currentUser?.role ?? "Viewer"}</span></div></div>
+          <div className="user-chip"><div className="avatar">{(currentUser?.displayName ?? t("common.warehouseUser")).split(/\s+/).map((part) => part[0]).join("").slice(0, 2)}</div><div><strong>{currentUser?.displayName ?? t("common.warehouseUser")}</strong><span>{currentUser?.role ?? t("common.viewer")}</span></div></div>
         </div>
       </aside>
       <main className="main">
         {shouldShowEnvironmentBanner(appEnv) && <div className="environment-banner">{appEnv.toUpperCase()}</div>}
         <header className="topbar">
           <div className="topbar-left">
-            <Button className="ghost mobile-menu" onClick={() => setSidebarOpen(true)} aria-label="Open navigation"><Menu /></Button>
+            <Button className="ghost mobile-menu" onClick={() => setSidebarOpen(true)} aria-label={t("common.openNavigation")}><Menu /></Button>
             <div><h1>{title}</h1><div className="topbar-date">{formatWarehouseDateTime(new Date(), locale, timeZone)} · {timeZone}</div></div>
             {showDemoReset && <Badge tone="teal">DEMO</Badge>}
           </div>
@@ -139,10 +139,10 @@ export function AppShell({
             <select className="warehouse-select" aria-label={t("common.warehouse")} value={warehouse} onChange={(event) => setWarehouse(event.target.value as WarehouseCode)}>
               {warehouses.map((row) => <option key={row.code} value={row.code}>{row.code} · {row.name}</option>)}
             </select>
-            <select className="language-select" aria-label="Language" value={locale} onChange={(event) => setLocale(event.target.value as "en" | "zh-CN")}>
+            <select className="language-select" aria-label={t("common.language")} value={locale} onChange={(event) => setLocale(event.target.value as "en" | "zh-CN")}>
               <option value="en">{t("language.en")}</option><option value="zh-CN">{t("language.zh-CN")}</option>
             </select>
-            {showDemoReset && <Button className="ghost" onClick={onResetDemo} title="Reset demo data" aria-label="Reset demo data"><RotateCcw /></Button>}
+            {showDemoReset && <Button className="ghost" onClick={onResetDemo} title={t("common.resetDemo")} aria-label={t("common.resetDemo")}><RotateCcw /></Button>}
           </div>
         </header>
         <div className="content">{children}</div>

@@ -65,12 +65,15 @@ export function WmsApp({ path }: { path: string[] }) {
 
   useEffect(() => {
     let active = true;
+    const operationsSections = ["receiving", "repair", "move", "adjustment", "transfers", "stocktake", "exceptions", "admin"];
     const boundedPage =
-      ["dashboard", "inventory", "sn-search", "bulk-sn", "audit"].includes(section) ||
+      ["dashboard", "inventory", "sn-search", "bulk-sn", "audit", "reconciliation"].includes(section) ||
       (section === "outbound" && !detailId);
     const readUrl =
       section === "outbound" && detailId && subroute !== "label"
         ? `/api/outbound/${encodeURIComponent(detailId)}`
+        : operationsSections.includes(section)
+          ? `/api/operations?section=${encodeURIComponent(section)}&warehouse=${encodeURIComponent(warehouse)}`
         : boundedPage
           ? "/api/bootstrap"
           : "/api/wms";
@@ -92,7 +95,7 @@ export function WmsApp({ path }: { path: string[] }) {
     return () => {
       active = false;
     };
-  }, [detailId, friendlyError, section, subroute, t]);
+  }, [detailId, friendlyError, section, subroute, t, warehouse]);
 
   useEffect(() => {
     if (!toast) return;
@@ -101,10 +104,13 @@ export function WmsApp({ path }: { path: string[] }) {
   }, [toast]);
 
   async function refreshCurrent() {
+    const operationsSections = ["receiving", "repair", "move", "adjustment", "transfers", "stocktake", "exceptions", "admin"];
     const refreshUrl =
       section === "outbound" && detailId && subroute !== "label"
         ? `/api/outbound/${encodeURIComponent(detailId)}`
-        : ["dashboard", "inventory", "sn-search", "bulk-sn", "audit"].includes(section) ||
+        : operationsSections.includes(section)
+          ? `/api/operations?section=${encodeURIComponent(section)}&warehouse=${encodeURIComponent(warehouse)}`
+        : ["dashboard", "inventory", "sn-search", "bulk-sn", "audit", "reconciliation"].includes(section) ||
             (section === "outbound" && !detailId)
           ? "/api/bootstrap"
           : "/api/wms";
@@ -146,7 +152,7 @@ export function WmsApp({ path }: { path: string[] }) {
 
   if (section === "outbound" && path[2] === "label") {
     const order = state.outboundOrders.find((row) => row.id === path[1]);
-    return order ? <LabelView order={order} state={state} /> : <div className="empty">Order not found.</div>;
+    return order ? <LabelView order={order} state={state} /> : <div className="empty">{t("common.orderNotFound")}</div>;
   }
 
   const title = t(routeTitleKeys[section] ?? "app.name");
@@ -183,7 +189,7 @@ export function WmsApp({ path }: { path: string[] }) {
           {section === "adjustment" && <AdjustmentView state={state} commit={commit} />}
           {section === "sn-search" && <SerialSearchView state={state} />}
           {section === "bulk-sn" && (
-            <BulkSerialPage state={state} warehouseCode={warehouse} onRefresh={refreshCurrent} />
+            <BulkSerialPage warehouseCode={warehouse} />
           )}
           {section === "transfers" && <TransferView state={state} commit={commit} />}
           {section === "stocktake" && <StocktakeView state={state} warehouse={warehouse} />}
@@ -306,7 +312,7 @@ function OutboundList({
                 <div className="subtle">{order.customerLabel}</div>
               </div>
               <div>
-                <span className="subtle">Pickup</span>
+                <span className="subtle">{t("common.pickup")}</span>
                 <div className="strong mono">{order.pickupCode ?? "Not generated"}</div>
               </div>
               <div>
@@ -328,9 +334,9 @@ function OutboundList({
         })}
       </div>
       <div className="toolbar">
-        <span className="subtle">{outboundPage.total} rows · page {page} / {outboundPage.totalPages || 1}</span>
-        <Button type="button" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>Previous</Button>
-        <Button type="button" disabled={page >= outboundPage.totalPages} onClick={() => setPage((value) => value + 1)}>Next</Button>
+        <span className="subtle">{t("common.rowsPage", { rows: outboundPage.total, page, pages: outboundPage.totalPages || 1 })}</span>
+        <Button type="button" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>{t("common.previous")}</Button>
+        <Button type="button" disabled={page >= outboundPage.totalPages} onClick={() => setPage((value) => value + 1)}>{t("common.next")}</Button>
       </div>
     </>
   );
@@ -349,7 +355,7 @@ function OutboundDetail({
 }) {
   const { t } = useI18n();
   const order = state.outboundOrders.find((row) => row.id === orderId);
-  const [activeLineId, setActiveLineId] = useState(order?.lines[0]?.id ?? "");
+  const [activeLineId, setActiveLineId] = useState(order?.lines.at(0)?.id ?? "");
   const [scanner, setScanner] = useState<ScannerState>({ value: "", inFlight: false });
   const [serialBatch, setSerialBatch] = useState<string[]>([]);
   const [pasteList, setPasteList] = useState("");
@@ -372,9 +378,9 @@ function OutboundDetail({
   const scannerRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (order?.lines.length && !order.lines.some((row) => row.id === activeLineId))
-      setActiveLineId(order.lines[0].id);
+      setActiveLineId(order.lines.at(0)!.id);
   }, [activeLineId, order]);
-  const line = order?.lines.find((row) => row.id === activeLineId) ?? order?.lines[0];
+  const line = order?.lines.find((row) => row.id === activeLineId) ?? order?.lines.at(0);
   if (!order || !line) return <Empty label="Outbound order not found." />;
   const candidates = state.inventory.filter(
     (row) =>
@@ -586,12 +592,12 @@ function OutboundDetail({
                 <thead>
                   <tr>
                     <th>SKU</th>
-                    <th>Model</th>
-                    <th>Condition</th>
-                    <th className="number">Required</th>
-                    <th className="number">Allocated</th>
-                    <th className="number">Prepared</th>
-                    <th className="number">Dispatched</th>
+                    <th>{t("common.model")}</th>
+                    <th>{t("common.condition")}</th>
+                    <th className="number">{t("common.required")}</th>
+                    <th className="number">{t("common.allocated")}</th>
+                    <th className="number">{t("common.prepared")}</th>
+                    <th className="number">{t("common.dispatched")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -622,7 +628,7 @@ function OutboundDetail({
             <div className="panel">
               <div className="panel-head">
                 <h3>{t("outbound.eligibleInventory")}</h3>
-                <span className="subtle">Only available stock matching condition</span>
+                <span className="subtle">{t("common.onlyMatchingCondition")}</span>
               </div>
               <div className="panel-body grid">
                 {candidates.map((row) => (
@@ -633,15 +639,15 @@ function OutboundDetail({
                     </div>
                     <div className="allocation-meta">
                       <div>
-                        <span>Physical</span>
+                        <span>{t("common.physical")}</span>
                         <strong>{row.physicalQty}</strong>
                       </div>
                       <div>
-                        <span>Frozen</span>
+                        <span>{t("common.frozen")}</span>
                         <strong>{row.frozenQty}</strong>
                       </div>
                       <div>
-                        <span>Available</span>
+                        <span>{t("common.available")}</span>
                         <strong>{row.availableQty}</strong>
                       </div>
                     </div>
@@ -690,20 +696,20 @@ function OutboundDetail({
               <div className="scanner-progress">
                 <div><span>{t("scanner.required")}</span><strong>{line.requiredQty}</strong></div>
                 <div><span>{t("scanner.scanned")}</span><strong>{line.scannedSerials.length} / {line.requiredQty}</strong></div>
-                <div><span>Pending batch</span><strong>{serialBatch.length}</strong></div>
+                <div><span>{t("common.pendingBatch")}</span><strong>{serialBatch.length}</strong></div>
               </div>
               {scanner.feedback && <div className={`scan-feedback ${scanner.feedback.tone}`} aria-live="polite">{scanner.feedback.message}</div>}
               <textarea
                 aria-label="Paste serial numbers"
-                placeholder="Paste Excel column, newline, comma or tab-separated serials"
+                placeholder={t("outbound.pastePlaceholder")}
                 value={pasteList}
                 onChange={(event) => setPasteList(event.target.value)}
                 rows={4}
               />
               <div className="scanner-row">
-                <Button type="button" onClick={addPastedSerials} disabled={!pasteList.trim() || batchBusy}>Add pasted list</Button>
+                <Button type="button" onClick={addPastedSerials} disabled={!pasteList.trim() || batchBusy}>{t("common.addPastedList")}</Button>
                 <label className="btn">
-                  Upload CSV/XLSX
+                  {t("bulk.upload")}
                   <input
                     type="file"
                     accept=".csv,.txt,.xlsx"
@@ -722,7 +728,7 @@ function OutboundDetail({
                   </div>
                   <div className="table-wrap">
                     <table>
-                      <thead><tr><th>SN</th><th>SKU</th><th>Location</th><th>Condition</th><th>Status</th><th>Result</th></tr></thead>
+                      <thead><tr><th>SN</th><th>SKU</th><th>{t("common.location")}</th><th>{t("common.condition")}</th><th>{t("common.status")}</th><th>{t("common.result")}</th></tr></thead>
                       <tbody>{batchValidation.results.map((row, index) => (
                         <tr key={`${row.serialNumber}:${index}`}>
                           <td className="mono">{row.serialNumber}</td><td>{row.sku ?? "—"}</td>
@@ -782,7 +788,7 @@ function OutboundDetail({
               <Summary label="Pickup code" value={order.pickupCode ?? "Generated when fully prepared"} mono />
               <Summary label="ERP warehouse" value={order.erpWarehouse} />
               <Summary label="Physical warehouse" value={order.warehouseCode} />
-              <Summary label="Allocation" value={line.allocationLocation ?? "Not allocated"} />
+              <Summary label="Allocation" value={line.allocationLocation ?? t("common.notAllocated")} />
               <Summary
                 label="Allocation detail"
                 value={
@@ -796,7 +802,7 @@ function OutboundDetail({
           </div>
           {line.preparedQty > 0 && (
             <div className="notice warn">
-              Frozen {line.preparedQty}. Physical stock remains unchanged until Confirm Dispatch.
+              {t("outbound.preparedPhysicalHelp", { frozen: line.preparedQty })}
             </div>
           )}
           {!canDispatch && order.status !== "Outbound" && (
@@ -873,7 +879,7 @@ function ReceivingView({
         remark: String(data.get("remark")),
         serialNumber: serial ? serial.toUpperCase() : undefined,
       },
-      "Standard inbound recorded and inventory updated.",
+      t("receiving.standardSuccess"),
     );
   }
   return (
@@ -892,7 +898,7 @@ function ReceivingView({
             <div className="form-grid">
               <Field label="Warehouse">
                 <select disabled>
-                  <option>SYD · Sydney Service Warehouse</option>
+                  <option>{state.warehouses.find((row) => row.code === "SYD")?.code} · {state.warehouses.find((row) => row.code === "SYD")?.name}</option>
                 </select>
               </Field>
               <Field label="Destination location">
@@ -923,8 +929,8 @@ function ReceivingView({
               <Field label="Quantity">
                 <input name="qty" type="number" min="1" defaultValue="1" />
               </Field>
-              <Field label="Serial number" help="Required for a traceable Product unit. Scanner input behaves as keyboard entry.">
-                <input name="serial" placeholder="Scan or enter SN" />
+              <Field label="Serial number" help={t("receiving.traceableHelp")}>
+                <input name="serial" placeholder={t("receiving.scanPlaceholder")} />
               </Field>
               <Field label="Remark" full>
                 <textarea name="remark" defaultValue="Standard ERP inbound receipt." />
@@ -939,7 +945,7 @@ function ReceivingView({
         )}
         {tab === "Faulty Return" && (
           <div className="panel-body">
-            <div className="notice">Faulty receipts use ERP SN lookup and default to the Sydney repair location.</div>
+            <div className="notice">{t("receiving.faultyNotice")}</div>
             <Link className="btn primary" href="/repair">
               <Wrench /> {t("action.openFaulty")}
             </Link>
@@ -947,9 +953,9 @@ function ReceivingView({
         )}
         {tab === "Transfer Receive" && (
           <div className="panel-body">
-            <div className="notice">Transfer receipt reduces In Transit and increases destination physical inventory.</div>
+            <div className="notice">{t("receiving.transferNotice")}</div>
             <Link className="btn primary" href="/transfers">
-              <Truck /> Open transfers
+              <Truck /> {t("receiving.openTransfers")}
             </Link>
           </div>
         )}
@@ -1119,7 +1125,7 @@ function RepairView({
       <div className="panel" style={{ marginTop: 16 }}>
         <div className="panel-head">
           <h3>{t("repair.lifecycleQueue")}</h3>
-          <span className="subtle">Same known SN is preserved through Repair → Repair_Good</span>
+          <span className="subtle">{t("repair.preserveSn")}</span>
         </div>
         <div className="panel-body grid">
           {(state.repairJobs ?? []).map((job) => (
@@ -1213,12 +1219,12 @@ function MoveView({
         <form className="panel" onSubmit={submit}>
           <div className="panel-head">
             <h3>{t("move.details")}</h3>
-            <Badge tone="teal">Atomic</Badge>
+            <Badge tone="teal">{t("common.atomic")}</Badge>
           </div>
           <div className="panel-body">
             <div className="form-grid">
               <Field label="Warehouse">
-                <input value="SYD · Sydney Service Warehouse" readOnly />
+                <input value={state.warehouses.find((row) => row.code === "SYD")?.name ?? "SYD"} readOnly />
               </Field>
               <Field label="SKU">
                 <select name="sku" defaultValue="10-105-00346-00">
@@ -1330,7 +1336,7 @@ function AdjustmentView({
         <form className="panel" onSubmit={submit}>
           <div className="panel-head">
             <h3>{t("adjustment.details")}</h3>
-            <Badge tone="amber">Supervisor</Badge>
+            <Badge tone="amber">{t("common.supervisor")}</Badge>
           </div>
           <div className="panel-body">
             <div className="form-grid">
@@ -1409,16 +1415,16 @@ function AdjustmentView({
           <div className="panel-body">
             <div className="timeline">
               <div className="timeline-item">
-                <strong>Never overwrite a balance</strong>
-                <p>Every correction creates an Adjustment_In or Adjustment_Out ledger entry.</p>
+                <strong>{t("adjustment.neverOverwrite")}</strong>
+                <p>{t("adjustment.neverOverwriteHelp")}</p>
               </div>
               <div className="timeline-item">
-                <strong>Product requires SKU</strong>
-                <p>Blank SKU is permitted only for unmonitored material with the exact controlled reason.</p>
+                <strong>{t("adjustment.productRequiresSku")}</strong>
+                <p>{t("adjustment.productRequiresSkuHelp")}</p>
               </div>
               <div className="timeline-item">
-                <strong>Move is separate</strong>
-                <p>Use Move when stock has a known source and destination.</p>
+                <strong>{t("adjustment.moveSeparate")}</strong>
+                <p>{t("adjustment.moveSeparateHelp")}</p>
               </div>
             </div>
           </div>
@@ -1506,7 +1512,7 @@ function SerialSearchView({ state }: { state: WmsState }) {
             <div className="panel-body summary-list">
               <Summary label="SKU" value={selected.sku} mono />
               <Summary label="Model" value={selected.model} />
-              <Summary label="Warehouse" value={selected.warehouseCode ?? "Outside WMS inventory"} />
+              <Summary label="Warehouse" value={selected.warehouseCode ?? t("common.outsideWms")} />
               <Summary label="Location" value={selected.locationCode ?? "—"} />
               <Summary label="Condition" value={<StatusBadge code={selected.condition} />} />
               <Summary label="Related SH" value={selected.relatedShNo ?? "—"} mono />
@@ -1570,7 +1576,7 @@ function TransferView({
                 <th>{t("table.transfer")}</th>
                 <th>{t("table.route")}</th>
                 <th>SKU / {t("common.model")}</th>
-                <th className="number">Qty</th>
+                <th className="number">{t("common.quantityShort")}</th>
                 <th>{t("table.serials")}</th>
                 <th>{t("common.status")}</th>
                 <th>{t("table.action")}</th>
@@ -1584,7 +1590,7 @@ function TransferView({
                     <span className="strong">{transfer.sourceWarehouse}</span> →{" "}
                     <span className="strong">{transfer.destinationWarehouse}</span>
                     <div className="subtle">
-                      {transfer.sourceLocation} → {transfer.destinationLocation ?? "destination pending"}
+                      {transfer.sourceLocation ?? "—"} → {transfer.destinationLocation ?? t("transfer.destinationPending")}
                     </div>
                   </td>
                   <td>
@@ -1665,7 +1671,7 @@ function StocktakeView({ state, warehouse }: { state: WmsState; warehouse: "SYD"
       <div className="panel">
         <div className="panel-head">
           <h3>ST-{warehouse}-0008 · Cycle count</h3>
-          <Badge tone="blue">Counting</Badge>
+          <Badge tone="blue">{t("common.counting")}</Badge>
         </div>
         <div className="table-wrap">
           <table>
@@ -1771,9 +1777,9 @@ function AuditView({ state }: { state: WmsState }) {
           </table>
         </div>
         <div className="toolbar">
-          <span className="subtle">{auditPage.total} rows · page {page} / {auditPage.totalPages || 1}</span>
-          <Button type="button" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>Previous</Button>
-          <Button type="button" disabled={page >= auditPage.totalPages} onClick={() => setPage((value) => value + 1)}>Next</Button>
+          <span className="subtle">{t("common.rowsPage", { rows: auditPage.total, page, pages: auditPage.totalPages || 1 })}</span>
+          <Button type="button" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>{t("common.previous")}</Button>
+          <Button type="button" disabled={page >= auditPage.totalPages} onClick={() => setPage((value) => value + 1)}>{t("common.next")}</Button>
         </div>
       </div>
     </>
@@ -1805,7 +1811,7 @@ function ExceptionView({ state }: { state: WmsState }) {
       <div className="grid metrics" style={{ gridTemplateColumns: "repeat(4, minmax(140px, 1fr))", marginBottom: 16 }}>
         {(["Critical", "High", "Medium", "Low"] as const).map((severity) => (
           <div className={cn("metric", severity === "Critical" && "alert")} key={severity}>
-            <div className="metric-label">{severity} severity</div>
+            <div className="metric-label">{t("exception.severityLabel", { severity: t(`status.${severity}`) })}</div>
             <div className="metric-value">
               {state.exceptions.filter((row) => row.severity === severity && row.status !== "Resolved").length}
             </div>
@@ -1820,7 +1826,7 @@ function ExceptionView({ state }: { state: WmsState }) {
               <tr>
                 <th>{t("table.severity")}</th>
                 <th>{t("table.type")}</th>
-                <th>Entity reference</th>
+                <th>{t("common.entityReference")}</th>
                 <th>{t("table.message")}</th>
                 <th>{t("common.status")}</th>
                 <th>{t("table.created")}</th>
@@ -1869,8 +1875,8 @@ function AdminView({ state, resource }: { state: WmsState; resource: string }) {
                   <th>SKU</th>
                   <th>{t("common.model")}</th>
                   <th>{t("table.type")}</th>
-                  <th>Category</th>
-                  <th>SN tracking</th>
+                  <th>{t("common.category")}</th>
+                  <th>{t("common.snTracking")}</th>
                   <th>{t("common.status")}</th>
                 </tr>
               </thead>
@@ -1881,7 +1887,7 @@ function AdminView({ state, resource }: { state: WmsState; resource: string }) {
                     <td>{row.model}</td>
                     <td>{row.itemType}</td>
                     <td>{row.category}</td>
-                    <td>{row.serialTrackingRequired ? "Required" : "Not required"}</td>
+                    <td>{row.serialTrackingRequired ? t("common.requiredValue") : t("common.notRequired")}</td>
                     <td>
                       <StatusBadge code={row.active ? "Active" : "Inactive"} label={row.active ? t("common.active") : t("common.inactive")} tone="teal" />
                     </td>
@@ -1898,8 +1904,8 @@ function AdminView({ state, resource }: { state: WmsState; resource: string }) {
                 <tr>
                   <th>{t("common.warehouse")}</th>
                   <th>{t("common.location")}</th>
-                  <th>Zone</th>
-                  <th>Service zone</th>
+                  <th>{t("common.zone")}</th>
+                  <th>{t("common.serviceZone")}</th>
                   <th>{t("common.status")}</th>
                 </tr>
               </thead>
@@ -1924,8 +1930,8 @@ function AdminView({ state, resource }: { state: WmsState; resource: string }) {
             <table>
               <thead>
                 <tr>
-                  <th>Code</th>
-                  <th>Name</th>
+                  <th>{t("common.code")}</th>
+                  <th>{t("common.name")}</th>
                   <th>{t("reconciliation.timezone")}</th>
                   <th>{t("nav.locations")}</th>
                   <th>{t("common.status")}</th>
@@ -1952,10 +1958,10 @@ function AdminView({ state, resource }: { state: WmsState; resource: string }) {
             <table>
               <thead>
                 <tr>
-                  <th>Physical warehouse</th>
-                  <th>ERP warehouse</th>
-                  <th>Mapped condition</th>
-                  <th>Allocation policy</th>
+                  <th>{t("common.physicalWarehouse")}</th>
+                  <th>{t("common.erpWarehouse")}</th>
+                  <th>{t("common.mappedCondition")}</th>
+                  <th>{t("common.allocationPolicy")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1965,7 +1971,7 @@ function AdminView({ state, resource }: { state: WmsState; resource: string }) {
                   <td>
                     <StatusBadge code="New" />
                   </td>
-                  <td>Normal allocatable product inventory</td>
+                  <td>{t("admin.normalAllocation")}</td>
                 </tr>
                 <tr>
                   <td>SYD</td>
@@ -1973,7 +1979,7 @@ function AdminView({ state, resource }: { state: WmsState; resource: string }) {
                   <td>
                     <StatusBadge code="Repair_Good" />
                   </td>
-                  <td>Repair-good allocation only</td>
+                  <td>{t("admin.repairGoodAllocation")}</td>
                 </tr>
               </tbody>
             </table>
@@ -2000,20 +2006,20 @@ function LabelView({ order, state }: { order: OutboundOrder; state: WmsState }) 
     <div className="label-page">
       <div className="print-controls">
         <Link className="btn" href={`/outbound/${order.id}`}>
-          <ArrowLeft /> Back to order
+          <ArrowLeft /> {t("label.backToOrder")}
         </Link>
         <Button className="primary" onClick={() => window.print()}>
           <Printer /> {t("action.printA4")}
         </Button>
       </div>
       <article className="label-sheet">
-        <div className="label-brand">FOXESS · WAREHOUSE OPERATIONS</div>
+        <div className="label-brand">FOXESS · {t("label.warehouseOperations")}</div>
         <div>
           <section className="label-main">
-            <div className="label-kicker">Service outbound · SH</div>
+            <div className="label-kicker">{t("label.serviceOutbound")}</div>
             <div className="label-sh">{shNos.join(" · ")}</div>
             <div className="label-pickup">
-              <span>Pickup</span>
+              <span>{t("common.pickup")}</span>
               <strong>{order.pickupCode ?? "PENDING"}</strong>
             </div>
           </section>
@@ -2026,7 +2032,7 @@ function LabelView({ order, state }: { order: OutboundOrder; state: WmsState }) 
             ))}
           </section>
         </div>
-        <div className="label-brand">BATCH LABEL · 1 LABEL / 1 A4 PAGE</div>
+        <div className="label-brand">{t("label.batchFooter")}</div>
       </article>
     </div>
   );

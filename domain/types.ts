@@ -138,7 +138,7 @@ export interface TransferOrder {
   model: string;
   qty: number;
   serials: string[];
-  sourceLocation: string;
+  sourceLocation?: string;
   destinationLocation?: string;
   createdAt?: string;
   preparedAt?: string;

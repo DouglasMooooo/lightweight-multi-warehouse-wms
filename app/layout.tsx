@@ -2,6 +2,8 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { I18nProvider } from "@/i18n/provider";
 
+export const preferredRegion = "syd1";
+
 export const metadata: Metadata = {
   title: "FoxESS Warehouse Operations",
   description: "Lightweight multi-warehouse WMS operational preview",

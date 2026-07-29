@@ -1,5 +1,7 @@
 import en from "./messages/en.json";
 import zhCN from "./messages/zh-CN.json";
+import bulkEn from "./messages/bulk-en.json";
+import bulkZhCN from "./messages/bulk-zh-CN.json";
 
 export const supportedLocales = ["en", "zh-CN"] as const;
 export type Locale = (typeof supportedLocales)[number];
@@ -7,7 +9,10 @@ export type TranslationKey = keyof typeof en;
 export const defaultLocale: Locale = "en";
 export const localeStorageKey = "wms-ui-locale";
 
-const messages: Record<Locale, Record<string, string>> = { en, "zh-CN": zhCN };
+const messages: Record<Locale, Record<string, string>> = {
+  en: { ...en, ...bulkEn },
+  "zh-CN": { ...zhCN, ...bulkZhCN },
+};
 
 export function isLocale(value: unknown): value is Locale {
   return supportedLocales.includes(value as Locale);

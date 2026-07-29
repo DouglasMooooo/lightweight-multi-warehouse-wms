@@ -153,6 +153,51 @@ export class PageQueryService {
     })) };
   }
 
+  async repairQueue(input: {
+    page?: number; pageSize?: number; warehouse?: string; status?: string;
+    query?: string; serialNumber?: string; receivedFrom?: Date; receivedTo?: Date;
+  }) {
+    const { page, pageSize } = boundedPage(input.page, input.pageSize);
+    const where: Prisma.RepairJobWhereInput = {
+      warehouse: input.warehouse ? { code: input.warehouse } : undefined,
+      status: input.status ? input.status as Prisma.RepairJobWhereInput["status"] : undefined,
+      receivedAt: input.receivedFrom || input.receivedTo
+        ? { gte: input.receivedFrom, lte: input.receivedTo }
+        : undefined,
+      serialNumber: input.serialNumber
+        ? { serialNumber: { contains: input.serialNumber.trim().toUpperCase() } }
+        : undefined,
+      product: input.query
+        ? { OR: [
+            { sku: { contains: input.query, mode: "insensitive" } },
+            { model: { contains: input.query, mode: "insensitive" } },
+          ] }
+        : undefined,
+    };
+    const [total, rows] = await Promise.all([
+      this.prisma.repairJob.count({ where }),
+      this.prisma.repairJob.findMany({
+        where,
+        include: { product: true, serialNumber: true, warehouse: true, currentLocation: true },
+        orderBy: { receivedAt: "desc" },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+    ]);
+    return {
+      page, pageSize, total, totalPages: Math.ceil(total / pageSize),
+      rows: rows.map((row) => ({
+        id: row.id, serialNumber: row.serialNumber?.serialNumber, sku: row.product.sku,
+        model: row.product.model, warehouseCode: row.warehouse.code,
+        currentLocation: row.currentLocation.code, originalShNo: row.originalShNo ?? undefined,
+        status: row.status, outcome: row.outcome ?? undefined, source: row.source,
+        receivedAt: row.receivedAt.toISOString(), repairStartedAt: row.repairStartedAt?.toISOString(),
+        repairCompletedAt: row.repairCompletedAt?.toISOString(),
+        returnedToStockAt: row.returnedToStockAt?.toISOString(), remark: row.remark,
+      })),
+    };
+  }
+
   async outbound(input: { page?: number; pageSize?: number; warehouse?: string; status?: string; history?: boolean }) {
     const { page, pageSize } = boundedPage(input.page, input.pageSize);
     const active = ["Imported", "Pending_Allocation", "Allocated", "Prepared", "Partially_Prepared", "Ready_for_Pickup"];
@@ -259,6 +304,111 @@ export class PageQueryService {
         }),
       }],
     };
+  }
+
+  async operations(section: string, warehouseCode: string) {
+    const base = await this.bootstrap();
+    const warehouse = await this.prisma.warehouse.findUniqueOrThrow({ where: { code: warehouseCode } });
+    const locationRows = async (allWarehouses = false) =>
+      (await this.prisma.location.findMany({
+        where: allWarehouses ? { active: true } : { warehouseId: warehouse.id, active: true },
+        include: { warehouse: true },
+        orderBy: { code: "asc" },
+        take: 500,
+      })).map((row) => ({
+        id: row.id, warehouseCode: row.warehouse.code, code: row.code, zone: row.zone,
+        serviceZone: row.serviceZone, active: row.active,
+      }));
+    const productRows = async () =>
+      (await this.prisma.product.findMany({ where: { active: true }, orderBy: { sku: "asc" }, take: 500 }))
+        .map((row) => ({
+          id: row.id, sku: row.sku, model: row.model, itemType: row.itemType,
+          category: row.category ?? "", serialTrackingRequired: row.serialTrackingRequired,
+          reportMachine: row.reportMachine, reportGroup: row.reportGroup ?? undefined, active: row.active,
+        }));
+    if (section === "receiving")
+      return { ...base, locations: await locationRows(), products: await productRows() };
+    if (section === "repair") {
+      const [locations, jobs] = await Promise.all([
+        locationRows(),
+        this.prisma.repairJob.findMany({
+          where: { warehouseId: warehouse.id },
+          include: { product: true, serialNumber: true, warehouse: true, currentLocation: true },
+          orderBy: { receivedAt: "desc" },
+          take: 100,
+        }),
+      ]);
+      return {
+        ...base,
+        locations,
+        repairJobs: jobs.map((row) => ({
+          id: row.id, serialNumber: row.serialNumber?.serialNumber, sku: row.product.sku,
+          model: row.product.model, warehouseCode: row.warehouse.code,
+          currentLocation: row.currentLocation.code, originalShNo: row.originalShNo ?? undefined,
+          status: row.status, outcome: row.outcome ?? undefined, source: row.source,
+          receivedAt: row.receivedAt.toISOString(), repairStartedAt: row.repairStartedAt?.toISOString(),
+          repairCompletedAt: row.repairCompletedAt?.toISOString(),
+          returnedToStockAt: row.returnedToStockAt?.toISOString(), remark: row.remark,
+        })),
+      };
+    }
+    if (section === "move" || section === "adjustment" || section === "stocktake") {
+      const [locations, products, inventory] = await Promise.all([
+        locationRows(),
+        productRows(),
+        this.inventory({ warehouse: warehouseCode, page: 1, pageSize: 100, positiveOnly: true }),
+      ]);
+      return { ...base, locations, products, inventory: inventory.rows };
+    }
+    if (section === "transfers") {
+      const rows = await this.prisma.transferOrder.findMany({
+        where: { OR: [{ sourceWarehouseId: warehouse.id }, { destinationWarehouseId: warehouse.id }] },
+        include: {
+          sourceWarehouse: true, destinationWarehouse: true, destinationLocation: true,
+          lines: { include: { product: true, serials: { include: { serialNumber: true } } } },
+        },
+        orderBy: { createdAt: "desc" },
+        take: 100,
+      });
+      const sourceTransactions = await this.prisma.stockTransaction.findMany({
+        where: {
+          transactionType: "Transfer_Out",
+          businessReference: { in: rows.map((row) => row.transferNo) },
+        },
+        select: { businessReference: true, productId: true, sourceLocation: { select: { code: true } } },
+      });
+      return {
+        ...base,
+        transfers: rows.flatMap((order) => order.lines.map((line) => ({
+          id: order.id, transferNo: order.transferNo, sourceWarehouse: order.sourceWarehouse.code,
+          destinationWarehouse: order.destinationWarehouse.code,
+          status: order.status === "Dispatched" ? "In_Transit" : order.status === "Cancelled" ? "Exception" : order.status,
+          sku: line.product.sku, model: line.product.model, qty: number(line.quantity),
+          serials: line.serials.map((item) => item.serialNumber.serialNumber),
+          sourceLocation: sourceTransactions.find((transaction) =>
+            transaction.businessReference === order.transferNo && transaction.productId === line.productId
+          )?.sourceLocation?.code,
+          destinationLocation: order.destinationLocation?.code,
+          createdAt: order.createdAt.toISOString(), preparedAt: order.preparedAt?.toISOString(),
+          dispatchedAt: order.dispatchedAt?.toISOString(), receivedAt: order.receivedAt?.toISOString(),
+        }))),
+      };
+    }
+    if (section === "exceptions") {
+      const rows = await this.prisma.exception.findMany({ orderBy: { createdAt: "desc" }, take: 100 });
+      return {
+        ...base,
+        exceptions: rows.map((row) => ({
+          id: row.id, type: row.type, severity: row.severity, entityReference: row.entityReference,
+          message: row.message, status: row.status, createdAt: row.createdAt.toISOString(),
+        })),
+      };
+    }
+    if (section === "admin") {
+      const [locations, products] = await Promise.all([locationRows(true), productRows()]);
+      return { ...base, locations, products };
+    }
+    throw new Error(`Unsupported bounded operations page: ${section}`);
   }
 
   async audit(input: { page?: number; pageSize?: number; operation?: string; businessReference?: string }) {

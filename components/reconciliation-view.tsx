@@ -123,7 +123,7 @@ export function ReconciliationView({ warehouse }: { warehouse: Warehouse }) {
             <label>{t("reconciliation.mode")}</label>
             <select value={mode} onChange={(event) => setMode(event.target.value as typeof mode)}>
               <option value="DRY_RUN">{t("reconciliation.compareOnly")}</option>
-              {seedVisible && <option value="SHADOW_SEED">Admin shadow seed</option>}
+              {seedVisible && <option value="SHADOW_SEED">{t("reconciliation.adminShadowSeed")}</option>}
             </select>
           </div>
           <div className="field full">

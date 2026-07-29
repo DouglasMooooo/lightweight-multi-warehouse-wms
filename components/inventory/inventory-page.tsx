@@ -84,9 +84,9 @@ export function InventoryPage({ warehouse }: { warehouse: WarehouseCode }) {
         </div>
         {error && <div className="notice error">{error}</div>}
         <div className="toolbar">
-          <span className="subtle">{data?.total ?? 0} rows · page {page} / {data?.totalPages ?? 1}</span>
-          <Button type="button" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>Previous</Button>
-          <Button type="button" disabled={page >= (data?.totalPages ?? 1)} onClick={() => setPage((value) => value + 1)}>Next</Button>
+          <span className="subtle">{t("common.rowsPage", { rows: data?.total ?? 0, page, pages: data?.totalPages ?? 1 })}</span>
+          <Button type="button" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>{t("common.previous")}</Button>
+          <Button type="button" disabled={page >= (data?.totalPages ?? 1)} onClick={() => setPage((value) => value + 1)}>{t("common.next")}</Button>
         </div>
       </div>
     </>

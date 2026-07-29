@@ -10,6 +10,7 @@
     "start": "next start",
     "postinstall": "prisma generate",
     "lint": "eslint .",
+    "i18n:check": "node scripts/check-operator-i18n.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

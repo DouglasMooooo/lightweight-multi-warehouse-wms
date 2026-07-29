@@ -5,11 +5,13 @@ export async function timed<T>(
   const startedAt = performance.now();
   try {
     const value = await operation();
+    const responseBytes = Buffer.byteLength(JSON.stringify(value), "utf8");
     console.info("wms_timing", {
       route: input.route,
       durationMs: Math.round(performance.now() - startedAt),
+      responseBytes,
       queryName: input.queryName,
-      rowCount: input.rowCount?.(value),
+      rows: input.rowCount?.(value),
       environment: process.env.VERCEL_ENV ?? process.env.NODE_ENV,
     });
     return value;
