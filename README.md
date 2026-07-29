@@ -44,7 +44,7 @@ NEXT_PUBLIC_APP_ENV=preview
 
 Unsafe Preview application + Production database combinations fail before Prisma connects.
 
-Open `/reconciliation` to upload an `.xlsx` snapshot in `DRY_RUN` mode. `SHADOW_SEED` is only available outside production when `SHADOW_IMPORT_ENABLED=true`, and only against empty shadow inventory. The same checksum, mode and cutover timestamp is idempotent.
+Open `/reconciliation` to upload an `.xlsx` snapshot in `DRY_RUN` mode. `SHADOW_SEED` is only available outside production when `SHADOW_IMPORT_ENABLED=true`. Controlled replacement additionally requires `SHADOW_IMPORT_REPLACE_ENABLED=true` and an explicit operator selection. Valid rows migrate independently while invalid rows remain diagnostics. The same checksum, mode and cutover timestamp is idempotent.
 
 To inspect a workbook without a database:
 

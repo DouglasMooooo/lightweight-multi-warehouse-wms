@@ -13,9 +13,9 @@ Whitespace, SKU, SN, location, booleans, dates, item types and conditions are no
 ## Modes
 
 - `DRY_RUN`: produces mapped rows, current-view and ledger-derived projections, active workflow projections, issues and reconciliation. It has no inventory writes.
-- `SHADOW_SEED`: requires non-production, `SHADOW_IMPORT_ENABLED=true`, an empty shadow inventory and no rejected rows. It imports the current snapshot as Opening evidence, not replayed history.
+- `SHADOW_SEED`: requires non-production and `SHADOW_IMPORT_ENABLED=true`. It imports valid entities independently, retains invalid rows as diagnostics and uses the current snapshot as Opening evidence rather than replayed history. Replacing existing Preview operational data additionally requires an explicit UI selection and `SHADOW_IMPORT_REPLACE_ENABLED=true`.
 
-The checksum + mode + cutover key is deterministic. The database unique constraint makes a repeated seed identifiable without adding stock twice.
+The checksum + mode + cutover key is deterministic. The database unique constraint makes a repeated seed identifiable without adding stock twice. `Migration_Excluded_Rows` is reference evidence only and never becomes inventory or a rejected-row count.
 
 ## Active work
 
