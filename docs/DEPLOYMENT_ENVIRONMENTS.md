@@ -18,3 +18,5 @@ Production UI never renders Demo Reset or SHADOW_SEED. Server-side guards remain
 Never copy production `DATABASE_URL` into a Preview environment. The metadata guard is defense-in-depth; separate Vercel environment-variable scopes and separate database credentials remain required.
 
 Vercel runs `prisma migrate deploy` before the application build. The Preview bootstrap may seed demo data only when the app is non-production, `DEMO_MODE=true`, the database metadata is non-production, and all checked WMS tables are empty. It skips any database that already contains WMS data and always skips production.
+
+With Neon, Prisma migrations prefer `DATABASE_URL_UNPOOLED` to avoid advisory-lock problems through the connection pool. Application queries continue to use the pooled `DATABASE_URL`.
