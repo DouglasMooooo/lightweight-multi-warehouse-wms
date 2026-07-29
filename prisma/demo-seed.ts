@@ -1,34 +1,36 @@
 import { PrismaClient } from "../generated/prisma/client";
 
-export async function seedDemo(prisma: PrismaClient) {
-  await prisma.$transaction([
-    prisma.auditLog.deleteMany(),
-    prisma.exception.deleteMany(),
-    prisma.eRPSyncJob.deleteMany(),
-    prisma.eRPDocument.deleteMany(),
-    prisma.stockTransaction.deleteMany(),
-    prisma.transferSerial.deleteMany(),
-    prisma.transferOrderLine.deleteMany(),
-    prisma.transferOrder.deleteMany(),
-    prisma.repairReturn.deleteMany(),
-    prisma.repairJob.deleteMany(),
-    prisma.outboundAllocation.deleteMany(),
-    prisma.outboundOrderLine.deleteMany(),
-    prisma.outboundOrder.deleteMany(),
-    prisma.pickupBatch.deleteMany(),
-    prisma.operationalSnapshot.deleteMany(),
-    prisma.repairWeeklyMetrics.deleteMany(),
-    prisma.serialNumber.deleteMany(),
-    prisma.inventoryBalance.deleteMany(),
-    prisma.pickupSequence.deleteMany(),
-    prisma.eRPWarehouseMapping.deleteMany(),
-    prisma.container.deleteMany(),
-    prisma.location.deleteMany(),
-    prisma.product.deleteMany(),
-    prisma.user.deleteMany(),
-    prisma.role.deleteMany(),
-    prisma.warehouse.deleteMany(),
-  ]);
+export async function seedDemo(prisma: PrismaClient, options: { skipReset?: boolean } = {}) {
+  if (!options.skipReset) {
+    await prisma.$transaction([
+      prisma.auditLog.deleteMany(),
+      prisma.exception.deleteMany(),
+      prisma.eRPSyncJob.deleteMany(),
+      prisma.eRPDocument.deleteMany(),
+      prisma.stockTransaction.deleteMany(),
+      prisma.transferSerial.deleteMany(),
+      prisma.transferOrderLine.deleteMany(),
+      prisma.transferOrder.deleteMany(),
+      prisma.repairReturn.deleteMany(),
+      prisma.repairJob.deleteMany(),
+      prisma.outboundAllocation.deleteMany(),
+      prisma.outboundOrderLine.deleteMany(),
+      prisma.outboundOrder.deleteMany(),
+      prisma.pickupBatch.deleteMany(),
+      prisma.operationalSnapshot.deleteMany(),
+      prisma.repairWeeklyMetrics.deleteMany(),
+      prisma.serialNumber.deleteMany(),
+      prisma.inventoryBalance.deleteMany(),
+      prisma.pickupSequence.deleteMany(),
+      prisma.eRPWarehouseMapping.deleteMany(),
+      prisma.container.deleteMany(),
+      prisma.location.deleteMany(),
+      prisma.product.deleteMany(),
+      prisma.user.deleteMany(),
+      prisma.role.deleteMany(),
+      prisma.warehouse.deleteMany(),
+    ]);
+  }
 
   const supervisorRole = await prisma.role.create({
     data: {

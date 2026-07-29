@@ -38,7 +38,7 @@ async function main() {
     if (counts.some((count) => count > 0)) {
       console.log("Skipping Preview seed because the database already contains WMS data.");
     } else {
-      await seedDemo(prisma);
+      await seedDemo(prisma, { skipReset: true });
       console.log("Seeded the empty non-production WMS Preview database.");
     }
   } finally {
