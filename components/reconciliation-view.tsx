@@ -1,8 +1,18 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { ShadowImportResult } from "@/import/workbook-types";
+import type { Warehouse } from "@/domain/types";
+import { useI18n } from "@/i18n/provider";
 import { reconciliationToCsv } from "@/import/reconciliation-csv";
+import type { ShadowImportResult } from "@/import/workbook-types";
+import { canShowShadowSeed } from "@/lib/environment";
+import {
+  currentWarehouseWallClock,
+  formatWarehouseDateTime,
+  warehouseWallClockToUtc,
+} from "@/lib/warehouse-time";
+import { StatusBadge } from "@/components/shared/status-badge";
+import { PageHeader } from "@/components/shared/ui";
 
 type Result = ShadowImportResult & {
   seeded: boolean;
@@ -10,12 +20,14 @@ type Result = ShadowImportResult & {
   importBatchId?: string;
 };
 
-export function ReconciliationView() {
+export function ReconciliationView({ warehouse }: { warehouse: Warehouse }) {
+  const { locale, t } = useI18n();
   const [file, setFile] = useState<File>();
-  const [cutoverAt, setCutoverAt] = useState(() => {
-    const date = new Date();
-    date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
-    return date.toISOString().slice(0, 16);
+  const [cutoverAt, setCutoverAt] = useState(() => currentWarehouseWallClock(warehouse.timezone));
+  const seedVisible = canShowShadowSeed({
+    appEnv: process.env.NEXT_PUBLIC_APP_ENV,
+    enabled: process.env.NEXT_PUBLIC_SHADOW_IMPORT_ENABLED,
+    adminTools: process.env.NEXT_PUBLIC_ENABLE_ADMIN_TOOLS,
   });
   const [mode, setMode] = useState<"DRY_RUN" | "SHADOW_SEED">("DRY_RUN");
   const [result, setResult] = useState<Result>();
@@ -23,6 +35,7 @@ export function ReconciliationView() {
   const [error, setError] = useState("");
   const [issueType, setIssueType] = useState("");
   const [query, setQuery] = useState("");
+  const [completed, setCompleted] = useState(false);
 
   const rows = useMemo(() => {
     const search = query.trim().toUpperCase();
@@ -39,25 +52,34 @@ export function ReconciliationView() {
     () => [...new Set((result?.reconciliation ?? []).map((row) => row.discrepancyType))].sort(),
     [result],
   );
+  const cutoverPreview = useMemo(() => {
+    try {
+      return warehouseWallClockToUtc(cutoverAt, warehouse.timezone);
+    } catch {
+      return undefined;
+    }
+  }, [cutoverAt, warehouse.timezone]);
 
   async function run() {
     if (!file) {
-      setError("Choose the latest Sydney .xlsx workbook.");
+      setError(t("reconciliation.chooseWorkbook"));
       return;
     }
     setBusy(true);
     setError("");
+    setCompleted(false);
     try {
       const form = new FormData();
       form.set("file", file);
-      form.set("cutoverAt", new Date(cutoverAt).toISOString());
-      form.set("mode", mode);
+      form.set("cutoverAt", warehouseWallClockToUtc(cutoverAt, warehouse.timezone).toISOString());
+      form.set("mode", seedVisible ? mode : "DRY_RUN");
       const response = await fetch("/api/reconciliation", { method: "POST", body: form });
       const body = (await response.json()) as Result | { error: string };
-      if (!response.ok) throw new Error("error" in body ? body.error : "Import failed.");
+      if (!response.ok) throw new Error("error" in body ? body.error : "Reconciliation failed.");
       setResult(body as Result);
+      setCompleted(true);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Import failed.");
+      setError(caught instanceof Error ? caught.message : "Reconciliation failed.");
     } finally {
       setBusy(false);
     }
@@ -75,102 +97,104 @@ export function ReconciliationView() {
 
   return (
     <>
-      <div className="page-head">
-        <div>
-          <h2>Shadow Reconciliation</h2>
-          <p>
-            Read-only semantic workbook comparison. It never edits the source workbook or automatically
-            corrects WMS inventory.
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        title={t("title.reconciliation")}
+        subtitle={t("reconciliation.subtitle")}
+        badge={<StatusBadge code="Pending" label={t("reconciliation.shadowMode")} tone="neutral" />}
+      />
+      <ol className="workflow-steps" aria-label="Reconciliation workflow">
+        {[t("reconciliation.upload"), t("reconciliation.cutover"), t("reconciliation.run"), t("reconciliation.review"), t("reconciliation.export")]
+          .map((label, index) => <li className={result && index >= 3 ? "done" : index <= 2 ? "active" : ""} key={label}><span>{index + 1}</span>{label}</li>)}
+      </ol>
       <div className="panel">
-        <div className="panel-head"><h3>Import snapshot</h3></div>
         <div className="panel-body form-grid">
           <div className="field full">
-            <label>Workbook (.xlsx, maximum 20 MB)</label>
+            <label>{t("reconciliation.upload")} (.xlsx · 20 MB max)</label>
             <input type="file" accept=".xlsx" onChange={(event) => setFile(event.target.files?.[0])} />
           </div>
           <div className="field">
-            <label>Shadow cutover time (operator local time)</label>
+            <label>{t("reconciliation.cutover")}</label>
             <input type="datetime-local" value={cutoverAt} onChange={(event) => setCutoverAt(event.target.value)} />
+            <span className="field-help">{warehouse.code} · {warehouse.name} · {warehouse.timezone}</span>
           </div>
           <div className="field">
-            <label>Mode</label>
+            <label>{t("reconciliation.mode")}</label>
             <select value={mode} onChange={(event) => setMode(event.target.value as typeof mode)}>
-              <option value="DRY_RUN">DRY_RUN — compare only</option>
-              <option value="SHADOW_SEED">SHADOW_SEED — guarded dev opening seed</option>
+              <option value="DRY_RUN">{t("reconciliation.compareOnly")}</option>
+              {seedVisible && <option value="SHADOW_SEED">Admin shadow seed</option>}
             </select>
           </div>
           <div className="field full">
+            <div className="cutover-preview">
+              <strong>{t("reconciliation.cutover")}:</strong>{" "}
+              {cutoverPreview
+                ? formatWarehouseDateTime(cutoverPreview, locale, warehouse.timezone)
+                : "—"}
+              <span>{t("reconciliation.timezone")}: {warehouse.timezone}</span>
+            </div>
             <button className="btn primary" disabled={busy} onClick={run}>
-              {busy ? "Reading workbook…" : mode === "DRY_RUN" ? "Run dry reconciliation" : "Run guarded shadow seed"}
+              {busy ? t("reconciliation.reconciling") : t("reconciliation.run")}
             </button>
           </div>
         </div>
       </div>
+      {completed && <div className="notice" style={{ marginTop: 15 }}>{t("reconciliation.completed")}</div>}
       {error && <div className="notice error" style={{ marginTop: 15 }}>{error}</div>}
       {result && (
         <>
-          <div className="grid metrics" style={{ marginTop: 15 }}>
+          <div className="grid reconciliation-metrics">
             {[
-              ["Matches", result.summary.matches],
-              ["Critical", result.summary.critical],
-              ["High", result.summary.high],
-              ["Medium", result.summary.medium],
-              ["Low", result.summary.low],
-              ["Active SH", result.activeOutboundOrders.length],
-              ["Repair items", result.repairItems.length],
-            ].map(([label, value]) => (
-              <div className="metric" key={label}>
-                <div className="metric-label">{label}</div>
-                <div className="metric-value">{value}</div>
-              </div>
+              ["MATCH", result.summary.matches, "teal"],
+              ["Critical", result.summary.critical, "red"],
+              ["High", result.summary.high, "red"],
+              ["Medium", result.summary.medium, "amber"],
+              ["Low", result.summary.low, "neutral"],
+            ].map(([label, value, tone]) => (
+              <div className="metric" key={label}><div className="metric-label">{label}</div><div className="metric-value">{value}</div><StatusBadge code={String(label)} label={String(label)} tone={String(tone)} /></div>
             ))}
-          </div>
-          <div className="notice warn" style={{ marginTop: 15 }}>
-            Source checksum: <span className="mono">{result.sourceChecksum}</span>. Accepted ledger rows:{" "}
-            {result.acceptedRows}; warnings: {result.warningRows}; rejected: {result.rejectedRows}.
-            {result.duplicate ? " Duplicate seed identified; no stock was added." : ""}
           </div>
           <div className="panel">
             <div className="toolbar">
               <input
-                placeholder="Filter SKU, location, SN or classification"
+                aria-label={t("common.search")}
+                placeholder={t("reconciliation.search")}
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
               />
               <select value={issueType} onChange={(event) => setIssueType(event.target.value)}>
-                <option value="">All issue types</option>
+                <option value="">{t("reconciliation.allIssues")}</option>
                 {issueTypes.map((value) => <option key={value}>{value}</option>)}
               </select>
-              <button className="btn" onClick={exportCsv}>Export filtered CSV</button>
+              <button className="btn" onClick={exportCsv}>{t("reconciliation.export")}</button>
             </div>
             <div className="table-wrap">
               <table>
                 <thead><tr>
-                  <th>Status</th><th>Severity</th><th>Source</th><th>SKU / SN</th>
-                  <th>Workbook Qty</th><th>WMS Qty</th><th>Workbook Location</th>
-                  <th>WMS Location</th><th>Condition</th><th>Classification</th><th>Notes</th>
+                  <th>{t("reconciliation.whatWrong")}</th><th>SKU / SN</th>
+                  <th>{t("reconciliation.workbookQty")}</th><th>{t("reconciliation.wmsQty")}</th>
+                  <th>{t("reconciliation.workbookLocation")}</th><th>{t("reconciliation.wmsLocation")}</th>
+                  <th>{t("reconciliation.severity")}</th><th>{t("common.technicalDetails")}</th>
                 </tr></thead>
                 <tbody>
                   {rows.map((row, index) => (
                     <tr key={`${row.discrepancyType}-${row.sku ?? row.serialNumber ?? index}-${index}`}>
-                      <td><span className="badge">{row.discrepancyType}</span></td>
-                      <td>{row.severity}</td><td>{row.source}</td>
-                      <td><span className="strong">{row.sku ?? "—"}</span><div className="subtle mono">{row.serialNumber}</div></td>
-                      <td className="number">{row.workbookQty ?? "—"}</td>
-                      <td className="number">{row.wmsQty ?? "—"}</td>
-                      <td>{row.workbookLocation ?? "—"}</td><td>{row.wmsLocation ?? "—"}</td>
-                      <td>{row.workbookCondition ?? row.wmsCondition ?? "—"}</td>
-                      <td>{row.classification}</td><td>{row.comment}</td>
+                      <td><strong>{row.comment}</strong><div className="subtle mono">{row.discrepancyType}</div></td>
+                      <td><span className="mono strong">{row.sku ?? "—"}</span><div className="subtle mono">{row.serialNumber}</div></td>
+                      <td className="number">{row.workbookQty ?? "—"}</td><td className="number">{row.wmsQty ?? "—"}</td>
+                      <td className="mono">{row.workbookLocation ?? "—"}</td><td className="mono">{row.wmsLocation ?? "—"}</td>
+                      <td><StatusBadge code={row.severity} label={row.severity} /></td>
+                      <td><details><summary>{t("common.technicalDetails")}</summary><div className="diagnostic-details">{row.source}<br />{row.classification}<br />{row.workbookCondition ?? "—"} → {row.wmsCondition ?? "—"}</div></details></td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-              {rows.length === 0 && <div className="empty">No reconciliation rows match the filters.</div>}
+              {rows.length === 0 && <div className="empty">{t("common.noResults")}</div>}
             </div>
           </div>
+          <details className="technical-summary"><summary>{t("common.technicalDetails")}</summary>
+            <div>SHA-256: <span className="mono">{result.sourceChecksum}</span></div>
+            <div>Accepted: {result.acceptedRows} · Warnings: {result.warningRows} · Rejected: {result.rejectedRows}</div>
+          </details>
         </>
       )}
     </>

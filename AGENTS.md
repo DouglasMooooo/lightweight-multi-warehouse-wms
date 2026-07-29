@@ -27,6 +27,10 @@ This repository is a real operational Warehouse Management System Preview based 
 - Use the shared physically-present SN policy for capacity checks and reconciliation.
 - Physically present SN statuses include `Scrapped`; allocatability is a separate, stricter policy.
 - Shadow workbook imports are server-side, semantic-header based, checksum-idempotent and never automatic in production.
+- Domain/database codes are never translated. English and Simplified Chinese exist only in the presentation layer.
+- Business dates are interpreted and displayed in the selected warehouse timezone, never implicitly in the browser timezone.
+- Preview/staging deployments must never connect to a production database; environment metadata is mandatory on Vercel.
+- Scanner-first fields submit on Enter, prevent rapid duplicates, preserve context on errors and restore focus.
 - Run tests, typecheck, lint and the production build before completing changes.
 
 ## Sydney rules

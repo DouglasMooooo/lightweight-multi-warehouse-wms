@@ -6,6 +6,8 @@ The outbound lifecycle is deliberately staged:
 
 `ERP import -> Pending Allocation -> Allocated -> Prepared/Frozen -> Ready for Pickup -> Outbound -> ERP sync`
 
+The operator UI supports English and Simplified Chinese without changing routes or persisted domain codes. The top-right language preference is stored only in browser localStorage; warehouse state remains PostgreSQL-backed.
+
 The release includes native repair start/completion, one-code/many-SH pickup labels, product-driven reporting, explicit business timestamps, structured validation codes and read-only balance/SN reconciliation.
 
 ## Requirements
@@ -31,6 +33,16 @@ pnpm dev
 ```
 
 Open `http://localhost:3000/dashboard`.
+
+Set deployment identity explicitly. Vercel Preview must use a Preview/Staging database and Production must use the production database:
+
+```text
+APP_ENV=preview
+DATABASE_ENV=preview
+NEXT_PUBLIC_APP_ENV=preview
+```
+
+Unsafe Preview application + Production database combinations fail before Prisma connects.
 
 Open `/reconciliation` to upload an `.xlsx` snapshot in `DRY_RUN` mode. `SHADOW_SEED` is only available outside production when `SHADOW_IMPORT_ENABLED=true`, and only against empty shadow inventory. The same checksum, mode and cutover timestamp is idempotent.
 
@@ -63,4 +75,4 @@ pnpm build
 
 `ERP_ADAPTER=mock` keeps ERP calls server-side with deterministic Preview fixtures. Workbook parsing is server-side, accepts `.xlsx` up to 20 MB, uses cached formula values only, and never executes macros or writes the source. Reconciliation never posts adjustments.
 
-See [Shadow Import](docs/SHADOW_IMPORT.md), [Architecture](docs/ARCHITECTURE.md), [Data Model](docs/DATA_MODEL.md), [Business Rules](docs/BUSINESS_RULES.md), [Workflows](docs/WORKFLOWS.md), [Reconciliation](docs/RECONCILIATION.md), [Cutover Plan](docs/CUTOVER_PLAN.md), and [Assumptions](docs/ASSUMPTIONS.md).
+See [i18n](docs/I18N.md), [UX Guidelines](docs/UX_GUIDELINES.md), [Deployment Environments](docs/DEPLOYMENT_ENVIRONMENTS.md), [Shadow Import](docs/SHADOW_IMPORT.md), [Architecture](docs/ARCHITECTURE.md), [Data Model](docs/DATA_MODEL.md), [Business Rules](docs/BUSINESS_RULES.md), [Workflows](docs/WORKFLOWS.md), [Reconciliation](docs/RECONCILIATION.md), [Cutover Plan](docs/CUTOVER_PLAN.md), and [Assumptions](docs/ASSUMPTIONS.md).

@@ -38,6 +38,7 @@ import { MockERPAdapter } from "@/integrations/mock-erp-adapter";
 import { getPrisma } from "@/lib/prisma";
 import { InventoryRepository, type BalanceKey } from "@/repositories/inventory-repository";
 import { seedDemo } from "@/prisma/demo-seed";
+import { assertDemoResetAllowed } from "@/lib/environment";
 
 type Tx = Prisma.TransactionClient;
 type Actor = { id: string; displayName: string; role: string };
@@ -153,6 +154,11 @@ export class WmsApplicationService {
   ) {}
 
   async snapshot(): Promise<WmsState> {
+    const currentUser = await this.prisma.user.findFirst({
+      where: { active: true },
+      include: { role: true },
+      orderBy: { createdAt: "asc" },
+    });
     const [
       warehouses,
       locations,
@@ -299,6 +305,13 @@ export class WmsApplicationService {
     }
 
     return {
+      currentUser: currentUser
+        ? {
+            displayName: currentUser.displayName,
+            role: currentUser.role.name,
+            permissions: currentUser.role.permissions,
+          }
+        : undefined,
       warehouses: warehouses.map((row) => ({
         id: row.id,
         code: row.code as WarehouseCode,
@@ -528,8 +541,14 @@ export class WmsApplicationService {
 
   async execute(command: WmsCommand): Promise<WmsState> {
     if (command.type === "resetDemo") {
-      if (process.env.DEMO_MODE !== "true" || process.env.NODE_ENV === "production")
+      try {
+        assertDemoResetAllowed({
+          appEnv: process.env.APP_ENV ?? process.env.VERCEL_ENV ?? process.env.NODE_ENV,
+          demoMode: process.env.DEMO_MODE,
+        });
+      } catch {
         throw new DomainError("Demo reset is disabled outside explicit non-production demo mode.");
+      }
       await seedDemo(this.prisma);
       return this.snapshot();
     }

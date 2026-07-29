@@ -29,3 +29,11 @@ Shadow import follows a separate path:
 `/reconciliation -> POST /api/reconciliation -> safe workbook reader -> semantic mapper/normalizer -> projection -> reconciliation`
 
 The workbook buffer never enters client business logic. `DRY_RUN` reads WMS reference data without mutations. Guarded `SHADOW_SEED` creates an import batch, opening balances, immutable Opening transactions, serial identities and audit evidence in one Serializable database transaction. It does not replay dirty spreadsheet history.
+
+## Presentation architecture
+
+`I18nProvider` owns the client locale preference and resolves semantic keys from `i18n/messages/en.json` or `zh-CN.json`. Domain DTOs are unchanged. Layout, Dashboard, Inventory, Reconciliation and shared UI primitives are separate component boundaries; domain services remain outside React.
+
+Status presentation uses one shared semantic tone function and translated display label. Scanner interaction state and warehouse-time conversion are pure helpers with focused tests.
+
+`getPrisma()` validates `APP_ENV`/`VERCEL_ENV` against `DATABASE_ENV` before creating a client. This is a runtime safety boundary, not merely a deployment convention.

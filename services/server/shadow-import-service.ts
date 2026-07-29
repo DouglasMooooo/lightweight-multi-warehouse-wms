@@ -6,6 +6,7 @@ import { analyzeWorkbook } from "@/import/workbook-analyzer";
 import { readWorkbookBuffer } from "@/import/workbook-reader";
 import type { ShadowImportMode, WmsShadowReference } from "@/import/workbook-types";
 import { getPrisma } from "@/lib/prisma";
+import { assertShadowSeedAllowed } from "@/lib/environment";
 
 export class ShadowImportService {
   constructor(private readonly prisma: PrismaClient = getPrisma()) {}
@@ -79,11 +80,17 @@ export class ShadowImportService {
   }
 
   private async seed(result: ReturnType<typeof analyzeWorkbook>) {
-    if (process.env.NODE_ENV === "production" || process.env.SHADOW_IMPORT_ENABLED !== "true")
+    try {
+      assertShadowSeedAllowed({
+        appEnv: process.env.APP_ENV ?? process.env.VERCEL_ENV ?? process.env.NODE_ENV,
+        enabled: process.env.SHADOW_IMPORT_ENABLED,
+      });
+    } catch {
       throw new DomainError(
         "SHADOW_SEED is disabled. It requires a non-production environment and SHADOW_IMPORT_ENABLED=true.",
         "SHADOW_SEED_DISABLED",
       );
+    }
     if (result.rejectedRows > 0)
       throw new DomainError(
         "SHADOW_SEED rejected because the workbook has High or Critical import issues.",

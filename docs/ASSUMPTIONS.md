@@ -31,3 +31,11 @@ Until explicit cutover approval, the workbook remains the production operational
 - Outbound actions without actual `Outbound_Date` remain reference evidence and are not promoted to confirmed dispatch.
 - Prepared without a real source location maps to Pending Allocation and does not freeze stock.
 - Location Master has no physical warehouse column; this Sydney-specific import requires an explicit/default SYD context. This default does not infer an unknown location.
+
+## Sprint 3.5 presentation and deployment assumptions
+
+- Supported UI locales are `en` and `zh-CN`; no localized value is written to PostgreSQL.
+- Language is a workstation/operator preference and does not alter stable operational URLs.
+- Warehouse wall-clock input is interpreted using the selected Warehouse `timezone`. The Sydney default is `Australia/Sydney`, including DST.
+- Vercel deployments must define `DATABASE_ENV`. Preview/staging with production database metadata is rejected; Production requires `DATABASE_ENV=production`.
+- Role-aware navigation uses server-returned permissions for preparation only. API/domain authorization remains the authoritative future enforcement point; this sprint does not claim complete RBAC.

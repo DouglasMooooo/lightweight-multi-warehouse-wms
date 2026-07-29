@@ -44,3 +44,9 @@ Reports use domain timestamps: movement flows use `effectiveAt`, outbound uses `
 4. Correct source master data or use a new controlled WMS transaction; there is no auto-fix.
 5. Only an approved non-production empty shadow database may use `SHADOW_SEED`.
 6. Repeat DRY_RUN during the pilot. ERP write-back and workbook write-back stay disabled.
+
+## Scanner interaction
+
+Normal barcode input behaves as keyboard text terminated by Enter. Outbound SN, faulty return and SN trace flows validate immediately, block rapid duplicate submissions, show a specific result, preserve failed input and return focus to the scanner field. Routine success uses inline/toast feedback rather than a modal.
+
+High-risk confirmations show the affected SH/SN/transfer, location and quantity. They explain the physical/frozen/in-transit effect instead of asking a generic “Are you sure?” question.

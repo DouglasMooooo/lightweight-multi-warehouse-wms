@@ -250,6 +250,11 @@ export interface WmsException {
 }
 
 export interface WmsState {
+  currentUser?: {
+    displayName: string;
+    role: string;
+    permissions: string[];
+  };
   warehouses: Warehouse[];
   locations: Location[];
   products: Product[];
