@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "vercel-build": "prisma migrate deploy && tsx scripts/bootstrap-preview-db.ts && next build",
     "start": "next start",
     "postinstall": "prisma generate",
     "lint": "eslint .",
