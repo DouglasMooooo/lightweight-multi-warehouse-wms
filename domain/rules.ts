@@ -1,4 +1,5 @@
 import { DomainError } from "./errors";
+import { isAllocatableSerialStatus } from "./serial-policy";
 import type { SerialStatus, StockCondition, WarehouseCode } from "./types";
 
 export interface BalanceQuantities {
@@ -59,8 +60,11 @@ export function validateOutboundSerial(input: {
       "Serial number is allocated to another active order.",
       "SN_ALREADY_ALLOCATED",
     );
-  if (input.status !== "In_Stock")
-    throw new DomainError("Serial number is not eligible for outbound allocation.");
+  if (!isAllocatableSerialStatus(input.status, input.serialCondition))
+    throw new DomainError(
+      "Serial number is not eligible for outbound allocation.",
+      "SN_NOT_ALLOCATABLE",
+    );
 }
 
 export function validateMove(input: {

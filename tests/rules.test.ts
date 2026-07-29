@@ -12,6 +12,7 @@ import {
 import {
   assertSerialRegistrationCapacity,
   isAllocatableStockCondition,
+  isAllocatableSerialStatus,
   isPhysicallyPresentSerialStatus,
   registeredSerialStatusForCondition,
 } from "@/domain/serial-policy";
@@ -157,15 +158,17 @@ describe("pickup codes", () => {
 });
 
 describe("serial physical-presence policy", () => {
-  it("counts In_Stock, Prepared and Repair only", () => {
+  it("counts In_Stock, Prepared, Repair and Scrapped as physically present", () => {
     expect(
-      ["In_Stock", "Prepared", "Repair"].every((status) =>
-        isPhysicallyPresentSerialStatus(status as "In_Stock" | "Prepared" | "Repair"),
+      ["In_Stock", "Prepared", "Repair", "Scrapped"].every((status) =>
+        isPhysicallyPresentSerialStatus(
+          status as "In_Stock" | "Prepared" | "Repair" | "Scrapped",
+        ),
       ),
     ).toBe(true);
     expect(
-      ["Outbound", "In_Transit", "Scrapped"].some((status) =>
-        isPhysicallyPresentSerialStatus(status as "Outbound" | "In_Transit" | "Scrapped"),
+      ["Outbound", "In_Transit"].some((status) =>
+        isPhysicallyPresentSerialStatus(status as "Outbound" | "In_Transit"),
       ),
     ).toBe(false);
   });
@@ -187,6 +190,11 @@ describe("serial physical-presence policy", () => {
     expect(isAllocatableStockCondition("Repair_Good")).toBe(true);
     expect(isAllocatableStockCondition("Repair")).toBe(false);
     expect(isAllocatableStockCondition("Scrap")).toBe(false);
+    expect(isAllocatableSerialStatus("In_Stock", "New")).toBe(true);
+    expect(isAllocatableSerialStatus("In_Stock", "Repair_Good")).toBe(true);
+    expect(isAllocatableSerialStatus("Prepared", "New")).toBe(false);
+    expect(isAllocatableSerialStatus("Repair", "Repair")).toBe(false);
+    expect(isAllocatableSerialStatus("Scrapped", "Scrap")).toBe(false);
   });
 
   it("registers Repair identity as Repair and rejects Scrap registration", () => {

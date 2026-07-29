@@ -29,3 +29,5 @@ Database checks prevent negative physical/frozen/in-transit values and Frozen gr
 `PickupBatch.status` is `Draft`, `Ready`, `Picked_Up` or `Cancelled`. `readyAt` and `pickedUpAt` are distinct; carrier, customer, collector and remark are optional evidence. Pickup Code is unique.
 
 `PickupSequence` is incremented atomically and the issued value comes from the returned row. It never uses `MAX(code) + 1`.
+
+`ShadowImportBatch` records source filename/checksum, mode, cutover, status, row counts, issues and actor. The unique checksum + mode + cutover constraint prevents duplicate seeds. Every seeded balance has a linked `Opening` StockTransaction through `shadowImportBatchId`; the batch is opening evidence, not reconstructed historical truth.

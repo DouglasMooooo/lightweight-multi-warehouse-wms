@@ -5,6 +5,7 @@ export const PHYSICALLY_PRESENT_SERIAL_STATUSES = [
   "In_Stock",
   "Prepared",
   "Repair",
+  "Scrapped",
 ] as const satisfies readonly SerialStatus[];
 
 export function isPhysicallyPresentSerialStatus(status: SerialStatus) {
@@ -13,6 +14,13 @@ export function isPhysicallyPresentSerialStatus(status: SerialStatus) {
 
 export function isAllocatableStockCondition(condition: StockCondition) {
   return condition === "New" || condition === "Repair_Good" || condition === "Material";
+}
+
+export function isAllocatableSerialStatus(
+  status: SerialStatus,
+  condition: StockCondition,
+) {
+  return status === "In_Stock" && (condition === "New" || condition === "Repair_Good");
 }
 
 export function registeredSerialStatusForCondition(condition: StockCondition): SerialStatus {

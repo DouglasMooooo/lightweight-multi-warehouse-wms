@@ -27,4 +27,6 @@
 - Returned_Unrepaired remains condition Repair with serial status Repair at a service/holding location. It is non-allocatable and has no `returnedToStockAt`.
 - Scrap remains non-allocatable, preserves one unit in Scrap inventory until a future controlled disposal flow, and has no `returnedToStockAt`.
 - `registerSerial` assigns an SN to unrepresented existing Physical Qty. It never changes a balance and rejects non-serial-tracked products or exhausted capacity.
-- Physically-present SN statuses are In_Stock, Prepared and Repair. Outbound, In_Transit and Scrapped do not count against Physical Qty.
+- Physically-present SN statuses are In_Stock, Prepared, Repair and Scrapped. Outbound and In_Transit do not count against Physical Qty.
+- Physical presence and outbound allocatability are separate policies. Scrapped remains physical but is never allocatable.
+- Shadow reconciliation and DRY_RUN never mutate inventory. SHADOW_SEED is explicit non-production opening import with ledger and audit evidence.

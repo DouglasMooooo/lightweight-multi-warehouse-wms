@@ -22,3 +22,12 @@ The validated Sydney workbook was inspected as read-only business evidence. The 
 - Returned_Unrepaired means the faulty unit was returned from the repair activity without becoming usable stock. It remains Repair/Repair; `returnedToStockAt` stays null.
 
 Until explicit cutover approval, the workbook remains the production operational reference and WMS is a shadow system. Reconciliation reports differences but never overwrites either source.
+
+## Sprint 3 import observations
+
+- The inspected source checksum remains `77135C0C077CCFFBE04AE40A526535A8A925150603A8C39ED49F5300A90836CD`.
+- Current Stock contains formula cells without cached results for some Container, SN and Frozen fields. The importer does not execute formulas; it uses cached scalar results and falls back to a transaction-derived SN projection.
+- The snapshot contains rows whose Item Type says `Item type not found`. These are rejected as data-quality issues rather than inferred from SKU or condition.
+- Outbound actions without actual `Outbound_Date` remain reference evidence and are not promoted to confirmed dispatch.
+- Prepared without a real source location maps to Pending Allocation and does not freeze stock.
+- Location Master has no physical warehouse column; this Sydney-specific import requires an explicit/default SYD context. This default does not infer an unknown location.

@@ -35,3 +35,12 @@ Transfer Out removes source Physical, adds In Transit, updates SNs and writes Tr
 ## Reporting and reconciliation
 
 Reports use domain timestamps: movement flows use `effectiveAt`, outbound uses `outboundAt`, and preparation uses `preparedAt`. Machine scope comes from Product `reportMachine`, not item type. Reconciliation maps semantic fields, compares balances/SNs and never writes inventory.
+
+## Shadow workbook import
+
+1. Select the latest `.xlsx` and an explicit Sydney business cutover time.
+2. Run `DRY_RUN`; semantic headers are resolved regardless of column order.
+3. Review rejected rows, active SH/Pickup/repair projections and inventory/SN differences.
+4. Correct source master data or use a new controlled WMS transaction; there is no auto-fix.
+5. Only an approved non-production empty shadow database may use `SHADOW_SEED`.
+6. Repeat DRY_RUN during the pilot. ERP write-back and workbook write-back stay disabled.

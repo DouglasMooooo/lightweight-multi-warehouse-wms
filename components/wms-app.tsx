@@ -39,6 +39,7 @@ import type {
   WmsCommand,
 } from "@/domain/types";
 import type { ERPSerialLookup } from "@/integrations/erp-adapter";
+import { ReconciliationView } from "@/components/reconciliation-view";
 
 const nav = [
   {
@@ -60,6 +61,7 @@ const nav = [
     label: "Control",
     items: [
       ["/exceptions", "Exceptions", ShieldAlert],
+      ["/reconciliation", "Reconciliation", ClipboardCheck],
       ["/audit", "Audit Log", FileClock],
     ],
   },
@@ -89,6 +91,7 @@ const routeTitles: Record<string, string> = {
   stocktake: "Stocktake",
   audit: "Audit Log",
   exceptions: "Exceptions",
+  reconciliation: "Shadow Reconciliation",
   admin: "Master Data",
 };
 
@@ -304,6 +307,7 @@ export function WmsApp({ path }: { path: string[] }) {
           {section === "stocktake" && <StocktakeView state={state} warehouse={warehouse} />}
           {section === "audit" && <AuditView state={state} />}
           {section === "exceptions" && <ExceptionView state={state} />}
+          {section === "reconciliation" && <ReconciliationView />}
           {section === "admin" && <AdminView state={state} resource={path[1] ?? "products"} />}
         </div>
       </main>

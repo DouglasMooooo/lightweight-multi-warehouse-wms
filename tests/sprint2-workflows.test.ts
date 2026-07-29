@@ -561,7 +561,7 @@ describe("spreadsheet reconciliation", () => {
     ]);
   });
 
-  it("excludes Outbound, In_Transit and Scrapped from physical serial count", () => {
+  it("excludes Outbound and In_Transit but counts Scrapped as physically present", () => {
     const [result] = reconcileSerialCounts(
       [
         {
@@ -571,7 +571,7 @@ describe("spreadsheet reconciliation", () => {
           warehouse: "SYD",
           location: "REPAIR-01",
           condition: "Repair",
-          physicalQty: 1,
+          physicalQty: 2,
         },
       ],
       [
@@ -582,7 +582,14 @@ describe("spreadsheet reconciliation", () => {
           condition: "Repair",
           status: "Repair",
         },
-        ...(["Outbound", "In_Transit", "Scrapped"] as const).map((status) => ({
+        {
+          productId: "p1",
+          warehouse: "SYD",
+          location: "REPAIR-01",
+          condition: "Repair",
+          status: "Scrapped",
+        },
+        ...(["Outbound", "In_Transit"] as const).map((status) => ({
           productId: "p1",
           warehouse: "SYD",
           location: "REPAIR-01",
@@ -591,6 +598,6 @@ describe("spreadsheet reconciliation", () => {
         })),
       ],
     );
-    expect(result).toMatchObject({ status: "SERIAL_COUNT_MATCH", activeSerialQty: 1 });
+    expect(result).toMatchObject({ status: "SERIAL_COUNT_MATCH", activeSerialQty: 2 });
   });
 });

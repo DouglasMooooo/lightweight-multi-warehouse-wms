@@ -208,7 +208,7 @@ describe("Serial traceability", () => {
     },
   );
 
-  it.each(["Outbound", "Scrapped"] as const)(
+  it.each(["Outbound"] as const)(
     "does not count %s serials as physically present",
     (status) => {
       const state = fresh();

@@ -1,6 +1,6 @@
 # Lightweight Multi-Warehouse WMS Preview
 
-The Domain Stabilisation release is a PostgreSQL-backed Next.js WMS Preview for SYD, MEL and BNE. PostgreSQL is authoritative; the Sydney workbook is read-only operational evidence. Inventory-changing commands run through Route Handlers, application services, domain validation, Prisma transactions and the ERP adapter.
+The Sprint 3 Preview is a PostgreSQL-backed Next.js WMS for SYD, MEL and BNE. PostgreSQL is authoritative; the Sydney workbook is read-only operational evidence. It adds guarded semantic workbook import and operational reconciliation without changing the source file.
 
 The outbound lifecycle is deliberately staged:
 
@@ -32,6 +32,14 @@ pnpm dev
 
 Open `http://localhost:3000/dashboard`.
 
+Open `/reconciliation` to upload an `.xlsx` snapshot in `DRY_RUN` mode. `SHADOW_SEED` is only available outside production when `SHADOW_IMPORT_ENABLED=true`, and only against empty shadow inventory. The same checksum, mode and cutover timestamp is idempotent.
+
+To inspect a workbook without a database:
+
+```powershell
+pnpm shadow:analyze reference/SYD_WMS_current_reference.xlsx 2026-07-29T00:00:00+10:00
+```
+
 For deployment, run migrations non-interactively:
 
 ```powershell
@@ -53,6 +61,6 @@ pnpm lint
 pnpm build
 ```
 
-`ERP_ADAPTER=mock` keeps ERP calls server-side with deterministic Preview fixtures. The operational workbook at `reference/SYD_WMS_current_reference.xlsx` is never modified or imported by the runtime. During shadow mode, reconciliation maps exported ledger values by semantic fields and reports differences without posting adjustments.
+`ERP_ADAPTER=mock` keeps ERP calls server-side with deterministic Preview fixtures. Workbook parsing is server-side, accepts `.xlsx` up to 20 MB, uses cached formula values only, and never executes macros or writes the source. Reconciliation never posts adjustments.
 
-See [Architecture](docs/ARCHITECTURE.md), [Data Model](docs/DATA_MODEL.md), [Business Rules](docs/BUSINESS_RULES.md), [Workflows](docs/WORKFLOWS.md), [Reconciliation](docs/RECONCILIATION.md), [Cutover Plan](docs/CUTOVER_PLAN.md), and [Assumptions](docs/ASSUMPTIONS.md).
+See [Shadow Import](docs/SHADOW_IMPORT.md), [Architecture](docs/ARCHITECTURE.md), [Data Model](docs/DATA_MODEL.md), [Business Rules](docs/BUSINESS_RULES.md), [Workflows](docs/WORKFLOWS.md), [Reconciliation](docs/RECONCILIATION.md), [Cutover Plan](docs/CUTOVER_PLAN.md), and [Assumptions](docs/ASSUMPTIONS.md).

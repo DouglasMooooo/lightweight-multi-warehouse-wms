@@ -25,6 +25,8 @@ This repository is a real operational Warehouse Management System Preview based 
 - `Returned_Unrepaired` stays in Repair status/condition and is never allocatable stock.
 - Serial registration binds identity to existing Physical Qty and never increases inventory.
 - Use the shared physically-present SN policy for capacity checks and reconciliation.
+- Physically present SN statuses include `Scrapped`; allocatability is a separate, stricter policy.
+- Shadow workbook imports are server-side, semantic-header based, checksum-idempotent and never automatic in production.
 - Run tests, typecheck, lint and the production build before completing changes.
 
 ## Sydney rules

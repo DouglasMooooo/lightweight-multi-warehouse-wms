@@ -23,3 +23,9 @@ ERP write-back is represented by durable `ERPSyncJob` rows. A confirmed physical
 Lifecycle timestamps belong to their domain records: `importedAt`, `allocatedAt`, `preparedAt`, `readyForPickupAt`, `outboundAt`, `receivedAt`, `repairStartedAt` and `repairCompletedAt`. `StockTransaction.recordedAt` is immutable system evidence; `effectiveAt` is the business operation time used by movement reports.
 
 Validation failures cross the HTTP boundary as stable error codes plus operator-readable messages. UI components render state and submit commands; they do not decide stock eligibility, reconciliation classification, label grouping or reporting scope.
+
+Shadow import follows a separate path:
+
+`/reconciliation -> POST /api/reconciliation -> safe workbook reader -> semantic mapper/normalizer -> projection -> reconciliation`
+
+The workbook buffer never enters client business logic. `DRY_RUN` reads WMS reference data without mutations. Guarded `SHADOW_SEED` creates an import batch, opening balances, immutable Opening transactions, serial identities and audit evidence in one Serializable database transaction. It does not replay dirty spreadsheet history.

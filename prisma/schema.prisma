@@ -138,6 +138,17 @@ enum StocktakeStatus {
   Cancelled
 }
 
+enum ShadowImportMode {
+  DRY_RUN
+  SHADOW_SEED
+}
+
+enum ShadowImportStatus {
+  Completed
+  Rejected
+  Failed
+}
+
 model Warehouse {
   id                 String                @id @default(cuid())
   code               String                @unique
@@ -279,6 +290,7 @@ model StockTransaction {
   recordedAt         DateTime             @default(now())
   effectiveAt        DateTime             @default(now())
   createdById        String
+  shadowImportBatchId String?
   warehouse          Warehouse            @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
   sourceLocation     Location?            @relation("TransactionSourceLocation", fields: [sourceLocationId], references: [id], onDelete: Restrict)
   targetLocation     Location?            @relation("TransactionTargetLocation", fields: [targetLocationId], references: [id], onDelete: Restrict)
@@ -286,12 +298,14 @@ model StockTransaction {
   product            Product?             @relation(fields: [productId], references: [id], onDelete: Restrict)
   serialNumber       SerialNumber?        @relation(fields: [serialNumberId], references: [id], onDelete: Restrict)
   createdBy          User                 @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  shadowImportBatch  ShadowImportBatch?   @relation(fields: [shadowImportBatchId], references: [id], onDelete: Restrict)
 
   @@index([recordedAt])
   @@index([warehouseId, effectiveAt])
   @@index([productId, effectiveAt])
   @@index([businessReference])
   @@index([operationId])
+  @@index([shadowImportBatchId])
 }
 
 model SerialNumber {
@@ -642,6 +656,30 @@ model User {
   transactions StockTransaction[]
   auditLogs    AuditLog[]
   approvedStocktakes Stocktake[]  @relation("StocktakeApprover")
+  shadowImportBatches ShadowImportBatch[]
+}
+
+model ShadowImportBatch {
+  id             String             @id @default(cuid())
+  sourceFileName String
+  sourceChecksum String
+  mode           ShadowImportMode
+  cutoverAt      DateTime
+  status         ShadowImportStatus
+  totalRows      Int
+  acceptedRows   Int
+  warningRows    Int
+  rejectedRows   Int
+  notes          String?
+  issues         Json?
+  createdById    String
+  importedAt     DateTime           @default(now())
+  createdBy      User               @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  transactions   StockTransaction[]
+
+  @@unique([sourceChecksum, mode, cutoverAt])
+  @@index([importedAt])
+  @@index([status])
 }
 
 model AuditLog {
