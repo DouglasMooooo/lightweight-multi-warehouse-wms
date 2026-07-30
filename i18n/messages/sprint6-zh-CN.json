@@ -66,6 +66,7 @@
   "map.activityView": "活动视图",
   "map.activityExperimental": "历史活动指标尚未达到可靠标准，因此本视图暂未启用。",
   "map.floorHelp": "选择区域，查看货架或服务库位明细。",
+  "map.occupied": "已占用",
   "map.occupiedLocations": "{count} 个已占用库位",
   "map.frozenLocations": "{count} 个待提货库位",
   "map.units": "{count} 件",
@@ -74,6 +75,8 @@
   "map.bay": "第 {bay} 格",
   "map.slotMixed": "混合",
   "map.searchFocus": "已定位到 {location}",
+  "map.inventoryHere": "当前库位库存",
+  "map.recentMovements": "最近移动记录",
   "map.legend.empty": "空库位",
   "map.legend.new": "新机",
   "map.legend.repairGood": "良品",
@@ -87,5 +90,6 @@
   "condition.Repair_Good": "良品 / 维修良品",
   "condition.Repair": "待修机",
   "condition.Scrap": "报废",
-  "condition.Material": "物料"
+  "condition.Material": "物料",
+  "status.Opening": "期初库存"
 }

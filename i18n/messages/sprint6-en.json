@@ -66,6 +66,7 @@
   "map.activityView": "Activity",
   "map.activityExperimental": "Activity view is not enabled until reliable history metrics are available.",
   "map.floorHelp": "Select an area to open its rack or service-location detail.",
+  "map.occupied": "Occupied",
   "map.occupiedLocations": "{count} occupied",
   "map.frozenLocations": "{count} awaiting pickup",
   "map.units": "{count} units",
@@ -74,6 +75,8 @@
   "map.bay": "Bay {bay}",
   "map.slotMixed": "MIX",
   "map.searchFocus": "Search focused {location}",
+  "map.inventoryHere": "Inventory at this location",
+  "map.recentMovements": "Recent movements",
   "map.legend.empty": "Empty",
   "map.legend.new": "New",
   "map.legend.repairGood": "Repair Good",
@@ -87,5 +90,6 @@
   "condition.Repair_Good": "Repair Good",
   "condition.Repair": "Faulty / Repair",
   "condition.Scrap": "Scrap",
-  "condition.Material": "Material"
+  "condition.Material": "Material",
+  "status.Opening": "Opening balance"
 }
