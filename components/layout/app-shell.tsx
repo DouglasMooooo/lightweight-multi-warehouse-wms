@@ -109,6 +109,12 @@ export function AppShell({
   const selectedWarehouse = warehouses.find((row) => row.code === warehouse);
   const timeZone = selectedWarehouse?.timezone ?? "Australia/Sydney";
   const appEnv = normalizeAppEnvironment(process.env.NEXT_PUBLIC_APP_ENV);
+  const environmentLabel =
+    appEnv === "preview"
+      ? t("environment.preview")
+      : appEnv === "staging"
+        ? t("environment.staging")
+        : appEnv.toUpperCase();
   const can = (permission?: string) =>
     !permission || currentUser?.permissions.includes("*") || currentUser?.permissions.includes(permission);
   return (
@@ -137,7 +143,7 @@ export function AppShell({
         </div>
       </aside>
       <main className="main">
-        {shouldShowEnvironmentBanner(appEnv) && <div className="environment-banner">{appEnv.toUpperCase()}</div>}
+        {shouldShowEnvironmentBanner(appEnv) && <div className="environment-banner">{environmentLabel}</div>}
         <header className="topbar">
           <div className="topbar-left">
             <Button className="ghost mobile-menu" onClick={() => setSidebarOpen(true)} aria-label={t("common.openNavigation")}><Menu /></Button>
