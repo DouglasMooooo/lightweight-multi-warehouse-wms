@@ -24,6 +24,7 @@ interface DashboardData {
   warehouse: { code: string; timezone: string };
   tasks: {
     needsAllocation: number; allocated: number; prepared: number; readyForPickup: number;
+    toPrepare: number; awaitingPickup: number;
     outboundToday: number; faultyReturns: number; repairQueue: number; transfersInTransit: number;
     exceptions: number; erpSyncFailures: number;
   };
@@ -52,15 +53,14 @@ export function DashboardPage({ warehouse }: { warehouse: WarehouseCode }) {
   const timeZone = data.warehouse.timezone;
   const tasks = data.tasks;
   const primary = [
-    ["dashboard.needsAllocation", tasks.needsAllocation, "/outbound", "blue"],
-    ["dashboard.prepared", tasks.prepared, "/outbound", "amber"],
-    ["dashboard.readyPickup", tasks.readyForPickup, "/outbound", "amber"],
+    ["dashboard.toPrepare", tasks.toPrepare, "/outbound", "blue"],
+    ["dashboard.awaitingPickup", tasks.awaitingPickup, "/outbound", "amber"],
     ["dashboard.repairQueue", tasks.repairQueue, "/repair", "blue"],
     ["dashboard.transfers", tasks.transfersInTransit, "/transfers", "amber"],
     ["dashboard.exceptions", tasks.exceptions, "/exceptions", "red"],
   ] as const;
   const attention = [
-    tasks.needsAllocation ? { text: t("dashboard.ordersNeedAllocation", { count: tasks.needsAllocation }), href: "/outbound" } : null,
+    tasks.toPrepare ? { text: t("dashboard.ordersToPrepare", { count: tasks.toPrepare }), href: "/outbound" } : null,
     tasks.repairQueue ? { text: t("dashboard.repairsWaiting", { count: tasks.repairQueue }), href: "/repair" } : null,
     tasks.exceptions ? { text: t("dashboard.exceptionsOpen", { count: tasks.exceptions }), href: "/exceptions" } : null,
     tasks.erpSyncFailures ? { text: t("dashboard.erpFailures", { count: tasks.erpSyncFailures }), href: "/admin/erp-mapping" } : null,

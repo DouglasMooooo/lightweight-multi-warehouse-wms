@@ -22,6 +22,7 @@ import type {
   OutboundOrder,
   SerialNumber,
   StockCondition,
+  WarehouseCode,
   WmsState,
   WmsCommand,
 } from "@/domain/types";
@@ -34,8 +35,11 @@ import { InventoryPage } from "@/components/inventory/inventory-page";
 import { InventoryReportPage } from "@/components/reports/inventory-report-page";
 import { AppShell } from "@/components/layout/app-shell";
 import { ERPImportPanel } from "@/components/outbound/erp-import-panel";
+import { OutboundBatchScanner } from "@/components/outbound/outbound-batch-scanner";
 import { Badge, StatusBadge } from "@/components/shared/status-badge";
 import { WarehouseMapPage } from "@/components/warehouse-map/warehouse-map-page";
+import { BatchTransferPanel } from "@/components/transfers/batch-transfer-panel";
+import { TransferReceiptPanel } from "@/components/transfers/transfer-receipt-panel";
 import { Button, cn, EmptyState as Empty, PageHeader as PageHead } from "@/components/shared/ui";
 import { useI18n } from "@/i18n/provider";
 import { shouldShowDemoReset } from "@/lib/environment";
@@ -46,6 +50,7 @@ import {
   type ScannerState,
 } from "@/lib/scanner";
 import { formatWarehouseDateTime } from "@/lib/warehouse-time";
+import { outboundOperatorStage, outboundQueueFor, type OutboundQueue } from "@/domain/outbound-presentation";
 
 const routeTitleKeys: Record<string, string> = {
   dashboard: "title.dashboard", inventory: "title.inventory", outbound: "title.outbound",
@@ -213,7 +218,7 @@ export function WmsApp({ path }: { path: string[] }) {
           {section === "bulk-sn" && (
             <BulkSerialPage warehouseCode={warehouse} />
           )}
-          {section === "transfers" && <TransferView state={state} commit={commit} />}
+          {section === "transfers" && <TransferView state={state} warehouse={warehouse} commit={commit} refresh={refreshCurrent} />}
           {section === "stocktake" && <StocktakeView state={state} warehouse={warehouse} />}
           {section === "audit" && <AuditView state={state} />}
           {section === "exceptions" && <ExceptionView state={state} />}
@@ -236,7 +241,7 @@ function OutboundList({
 }) {
   const { t } = useI18n();
   const [query, setQuery] = useState("");
-  const [queue, setQueue] = useState("Active");
+  const [queue, setQueue] = useState<OutboundQueue>("To_Prepare");
   const [page, setPage] = useState(1);
   const [reloadToken, setReloadToken] = useState(0);
   const [outboundPage, setOutboundPage] = useState<{ rows: OutboundOrder[]; total: number; totalPages: number }>({
@@ -247,7 +252,7 @@ function OutboundList({
   useEffect(() => {
     const controller = new AbortController();
     const params = new URLSearchParams({ page: String(page), pageSize: "50", warehouse });
-    if (queue !== "Active") params.set("status", queue);
+    params.set("status", queue);
     fetch(`/api/outbound?${params}`, { cache: "no-store", signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) throw new Error(t("common.loadFailed"));
@@ -259,13 +264,7 @@ function OutboundList({
   const orders = outboundPage.rows.filter(
     (order) =>
       order.warehouseCode === warehouse &&
-      (queue === "Active"
-        ? order.status !== "Outbound"
-        : queue === "Needs"
-          ? ["Imported", "Pending_Allocation"].includes(order.status)
-          : queue === "Outbound"
-            ? order.status === "Outbound"
-            : order.status === queue) &&
+      outboundQueueFor(order.status, order.erpSyncStatus) === queue &&
       `${order.shNo} ${order.pickupCode ?? ""} ${order.lines.map((line) => line.sku).join(" ")}`
         .toLowerCase()
         .includes(query.toLowerCase()),
@@ -279,14 +278,13 @@ function OutboundList({
       <ERPImportPanel onImported={async () => { await refresh(); setReloadToken((value) => value + 1); }} />
       <div className="queue-tabs" role="tablist">
         {[
-          ["Active", t("common.active")],
-          ["Needs", t("status.Pending_Allocation")],
-          ["Allocated", t("status.Allocated")],
-          ["Prepared", t("status.Prepared")],
-          ["Ready_for_Pickup", t("status.Ready_for_Pickup")],
-          ["Outbound", t("status.Outbound")],
+          ["To_Prepare", t("outbound.queue.toPrepare")],
+          ["Partially_Prepared", t("outbound.queue.partiallyPrepared")],
+          ["Awaiting_Pickup", t("outbound.queue.awaitingPickup")],
+          ["Outbound", t("outbound.queue.outbound")],
+          ["ERP_Issues", t("outbound.queue.erpIssues")],
         ].map(([value, label]) => (
-          <button className={queue === value ? "active" : ""} key={value} onClick={() => setQueue(value)}>{label}</button>
+          <button className={queue === value ? "active" : ""} key={value} onClick={() => setQueue(value as OutboundQueue)}>{label}</button>
         ))}
       </div>
       <div className="panel">
@@ -325,7 +323,14 @@ function OutboundList({
                   <td><Link className="queue-identifier mono" href={`/outbound/${order.id}`}>{order.shNo}</Link><span className="queue-secondary mono">{order.pickupCode ?? t("outbound.pickupWhenPrepared")}</span></td>
                   <td><strong>{order.lines.map((line) => line.sku).slice(0, 2).join(" · ")}</strong><span className="queue-secondary">{t("outbound.lineUnits", { lines: order.lines.length, units: required })}</span></td>
                   <td><div className="status-stack">{conditions.map((condition) => <StatusBadge code={condition} key={condition} />)}</div></td>
-                  <td><StatusBadge code={order.status} /></td>
+                  <td><StatusBadge code={order.status} label={t(`outbound.stage.${{
+                    TO_PREPARE: "toPrepare",
+                    PARTIALLY_PREPARED: "partiallyPrepared",
+                    AWAITING_PICKUP: "awaitingPickup",
+                    OUTBOUND: "outbound",
+                    ERP_SYNCED: "erpSynced",
+                    ERP_ISSUE: "erpIssues",
+                  }[outboundOperatorStage(order.status, order.erpSyncStatus)]}`)} /></td>
                   <td className="queue-progress"><strong>{prepared} / {required}</strong><div className="progress"><span style={{ width: `${required ? Math.min(100, (prepared / required) * 100) : 0}%` }} /></div></td>
                   <td><Link className="btn small queue-action" href={`/outbound/${order.id}`}>{nextAction}<ArrowRight /></Link></td>
                 </tr>
@@ -402,23 +407,14 @@ function OutboundDetail({
     }) &&
     order.status !== "Outbound";
   const canPrepare = line.allocatedQty > line.preparedQty && order.status !== "Outbound";
-  const allAllocated = order.lines.every((candidate) => candidate.allocatedQty >= candidate.requiredQty);
   const allPrepared = order.lines.every((candidate) => candidate.preparedQty >= candidate.requiredQty);
-  const allSerialComplete = order.lines.every((candidate) => {
-    const requiresSerial = state.products.find((product) => product.sku === candidate.sku)?.serialTrackingRequired;
-    return !requiresSerial || candidate.scannedSerials.length >= candidate.requiredQty;
-  });
-  const readyForPickup = ["Ready_for_Pickup", "Outbound", "ERP_Synced"].includes(order.status);
   const dispatched = ["Outbound", "ERP_Synced"].includes(order.status);
-  const erpSynced = order.erpSyncStatus === "Synced" || order.status === "ERP_Synced";
   const workflow = [
-    { key: "outbound.step.erp", complete: true },
-    { key: "outbound.step.allocated", complete: allAllocated },
-    { key: "outbound.step.prepared", complete: allPrepared },
-    { key: "outbound.step.sn", complete: allSerialComplete },
-    { key: "outbound.step.ready", complete: readyForPickup },
-    { key: "outbound.step.dispatched", complete: dispatched },
-    { key: "outbound.step.erpSync", complete: erpSynced },
+    { key: "outbound.step.erpImported", complete: true },
+    { key: "outbound.step.toPrepare", complete: allPrepared },
+    { key: "outbound.step.preparationComplete", complete: allPrepared },
+    { key: "outbound.step.awaitingPickup", complete: dispatched },
+    { key: "outbound.step.outbound", complete: dispatched },
   ];
   const currentWorkflowIndex = workflow.findIndex((stage) => !stage.complete);
 
@@ -548,7 +544,7 @@ function OutboundDetail({
               <ArrowLeft /> {t("outbound.orders")}
             </Link>
             <Link className="btn" href={`/outbound/${order.id}/label`}>
-              <Printer /> {t("outbound.printLabel")}
+              <Printer /> {t("label.print")}
             </Link>
             <Button
               className="primary"
@@ -591,12 +587,20 @@ function OutboundDetail({
           </div>
         ))}
       </div>
+      <OutboundBatchScanner order={order} onCommitted={refresh} />
       <div className="split">
         <div className="grid">
           <div className="panel">
             <div className="panel-head">
               <h3>{t("outbound.requestedLine")}</h3>
-              <StatusBadge code={order.status} />
+              <StatusBadge code={order.status} label={t(`outbound.stage.${{
+                TO_PREPARE: "toPrepare",
+                PARTIALLY_PREPARED: "partiallyPrepared",
+                AWAITING_PICKUP: "awaitingPickup",
+                OUTBOUND: "outbound",
+                ERP_SYNCED: "erpSynced",
+                ERP_ISSUE: "erpIssues",
+              }[outboundOperatorStage(order.status, order.erpSyncStatus)]}`)} />
             </div>
             <div className="table-wrap">
               <table>
@@ -1581,15 +1585,38 @@ function SerialSearchView({ state }: { state: WmsState }) {
 
 function TransferView({
   state,
+  warehouse,
   commit,
+  refresh,
 }: {
   state: WmsState;
+  warehouse: WarehouseCode;
   commit: (command: WmsCommand, success: string) => Promise<boolean>;
+  refresh: () => Promise<void>;
 }) {
   const { t } = useI18n();
   return (
     <>
       <PageHead title={t("title.transfers")} subtitle={t("page.transferSubtitle")} />
+      <BatchTransferPanel sourceWarehouse={warehouse} onConfirmed={refresh} />
+      {state.transfers
+        .filter((transfer, index, rows) =>
+          transfer.status === "In_Transit" &&
+          transfer.destinationWarehouse === warehouse &&
+          rows.findIndex((candidate) => candidate.id === transfer.id) === index
+        )
+        .map((transfer) => (
+          <TransferReceiptPanel
+            key={`receipt-${transfer.id}`}
+            transferId={transfer.id}
+            transferNo={transfer.transferNo}
+            destinationWarehouse={transfer.destinationWarehouse}
+            expectedCount={state.transfers
+              .filter((candidate) => candidate.id === transfer.id)
+              .reduce((sum, candidate) => sum + candidate.serials.length, 0)}
+            onConfirmed={refresh}
+          />
+        ))}
       <div className="notice">{t("transfer.notice")}</div>
       <div className="panel">
         <div className="table-wrap">
@@ -1607,7 +1634,7 @@ function TransferView({
             </thead>
             <tbody>
               {state.transfers.map((transfer) => (
-                <tr key={transfer.id}>
+                <tr key={`${transfer.id}:${transfer.sku}:${transfer.condition}`}>
                   <td className="mono strong">{transfer.transferNo}</td>
                   <td>
                     <span className="strong">{transfer.sourceWarehouse}</span> →{" "}
@@ -1650,19 +1677,7 @@ function TransferView({
                         {t("action.transferOut")}
                       </Button>
                     )}
-                    {transfer.status === "In_Transit" && (
-                      <Button
-                        className="primary small"
-                        onClick={() =>
-                          commit(
-                            { type: "receiveTransfer", transferId: transfer.id, destinationLocation: "M1-1-1-L" },
-                            t("success.transferReceived", { transfer: transfer.transferNo }),
-                          )
-                        }
-                      >
-                        {t("action.transferIn")}
-                      </Button>
-                    )}
+                    {transfer.status === "In_Transit" && <span className="subtle">{t("transfer.receiveTitle")}</span>}
                     {transfer.status === "Received" && <span className="subtle">{t("transfer.complete")}</span>}
                   </td>
                 </tr>
@@ -1984,50 +1999,84 @@ function AdminView({ state, resource }: { state: WmsState; resource: string }) {
   );
 }
 
-function LabelView({ order, state }: { order: OutboundOrder; state: WmsState }) {
+function LabelView({ order }: { order: OutboundOrder; state: WmsState }) {
   const { t } = useI18n();
-  const batch = state.pickupBatches?.find((row) => row.code === order.pickupCode);
-  const shNos = batch?.shNos ?? [order.shNo];
-  const lines =
-    batch?.lines ??
-    order.lines.map((line) => ({
-      sku: line.sku,
-      model: line.model,
-      erpWarehouse: line.erpWarehouse ?? order.erpWarehouse,
-      qty: line.requiredQty,
-    }));
+  const [mode, setMode] = useState<"BATCH_LABEL" | "UNIT_SN_LABEL">("BATCH_LABEL");
+  const [labels, setLabels] = useState<Array<{
+    groupKey: string;
+    pickupCode?: string;
+    shNos: string[];
+    serialNumber?: string;
+    totalQty: number;
+    lines: Array<{ sku: string; model: string; erpWarehouse: string; qty: number }>;
+  }>>([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch(`/api/labels/preview?orderId=${encodeURIComponent(order.id)}&mode=${mode}`, {
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(t("common.loadFailed"));
+        const body = await response.json();
+        setLabels(body.labels);
+      })
+      .catch((reason) => {
+        if (reason?.name !== "AbortError") setLabels([]);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
+  }, [mode, order.id, t]);
   return (
     <div className="label-page">
       <div className="print-controls">
         <Link className="btn" href={`/outbound/${order.id}`}>
           <ArrowLeft /> {t("label.backToOrder")}
         </Link>
-        <Button className="primary" onClick={() => window.print()}>
+        <div className="label-mode-switch" role="group" aria-label={t("label.previewTitle")}>
+          <Button className={mode === "BATCH_LABEL" ? "primary" : ""} onClick={() => { setLoading(true); setMode("BATCH_LABEL"); }}>
+            {t("label.pickupBatch")}
+          </Button>
+          <Button className={mode === "UNIT_SN_LABEL" ? "primary" : ""} onClick={() => { setLoading(true); setMode("UNIT_SN_LABEL"); }}>
+            {t("label.unitSn")}
+          </Button>
+        </div>
+        <Button className="primary" disabled={loading || !labels.length} onClick={() => window.print()}>
           <Printer /> {t("action.printA4")}
         </Button>
       </div>
-      <article className="label-sheet">
+      <div className="notice">{t("label.previewHelp")}</div>
+      {loading && <div className="page-loading">{t("common.loading")}</div>}
+      {!loading && !labels.length && <Empty label={mode === "UNIT_SN_LABEL" ? t("scanner.waiting") : t("common.noResults")} />}
+      {labels.map((label) => (
+      <article className="label-sheet" key={label.groupKey}>
         <div className="label-brand">FOXESS · {t("label.warehouseOperations")}</div>
         <div>
           <section className="label-main">
-            <div className="label-kicker">{t("label.serviceOutbound")}</div>
-            <div className="label-sh">{shNos.join(" · ")}</div>
+            <div className="label-kicker">{mode === "BATCH_LABEL" ? t("label.pickupBatch") : t("label.unitSn")}</div>
+            <div className="label-sh">{label.shNos.join(" · ")}</div>
             <div className="label-pickup">
-              <span>{t("common.pickup")}</span>
-              <strong>{order.pickupCode ?? "PENDING"}</strong>
+              <span>{label.pickupCode ? t("common.pickup") : t("label.shNumbers")}</span>
+              <strong>{label.pickupCode ?? label.shNos.join(" · ")}</strong>
             </div>
+            {label.serialNumber && <div className="label-serial mono">{label.serialNumber}</div>}
           </section>
           <section className="label-details">
-            {lines.map((line) => (
+            {label.lines.map((line) => (
               <div className="label-detail" key={`${line.sku}:${line.model}:${line.erpWarehouse}`}>
                 <span>{line.sku} · {line.model}</span>
                 <strong>{line.erpWarehouse} · Qty {line.qty}</strong>
               </div>
             ))}
+            <div className="label-total"><span>{t("label.totalQty")}</span><strong>{label.totalQty}</strong></div>
           </section>
         </div>
         <div className="label-brand">{t("label.batchFooter")}</div>
       </article>
+      ))}
     </div>
   );
 }

@@ -451,6 +451,7 @@ export class WmsApplicationService {
                 : transfer.status,
           sku: line.product.sku,
           model: line.product.model,
+          condition: line.condition,
           qty: number(line.quantity),
           serials: line.serials.map((row) => row.serialNumber.serialNumber),
           sourceLocation:
@@ -1787,30 +1788,55 @@ export class WmsApplicationService {
       const dispatchedAt = new Date();
       const op = operationId();
       for (const line of transfer.lines) {
-        const sourceLocationId = line.serials[0]?.serialNumber.currentLocationId;
-        if (!sourceLocationId) throw new DomainError("Transfer source location is missing.");
-        const key = balanceKey({
-          warehouseId: transfer.sourceWarehouseId,
-          locationId: sourceLocationId,
-          productId: line.productId,
-          itemType: line.product.itemType,
-          condition: line.condition,
-        });
-        const current = await inventory.getOrCreateBalance(key);
-        if (current.physicalQty.minus(current.frozenQty).lessThan(line.quantity))
-          throw new DomainError("Transfer cannot consume frozen inventory.");
         if (
           line.product.serialTrackingRequired &&
           (line.serials.length !== number(line.quantity) ||
             line.serials.some(
               (row) =>
                 row.serialNumber.currentWarehouseId !== transfer.sourceWarehouseId ||
-                row.serialNumber.currentLocationId !== sourceLocationId ||
+                !row.serialNumber.currentLocationId ||
+                row.serialNumber.condition !== line.condition ||
                 row.serialNumber.status !== "In_Stock",
             ))
         )
           throw new DomainError("Transfer serial selection is incomplete or invalid.");
-        await inventory.applyDelta(key, { physicalDelta: line.quantity.negated(), inTransitDelta: line.quantity });
+        const byLocation = new Map<string, typeof line.serials>();
+        for (const link of line.serials) {
+          const locationId = link.serialNumber.currentLocationId;
+          if (!locationId) throw new DomainError("Transfer source location is missing.");
+          byLocation.set(locationId, [...(byLocation.get(locationId) ?? []), link]);
+        }
+        for (const [sourceLocationId, links] of byLocation) {
+          const quantity = decimal(links.length);
+          const key = balanceKey({
+            warehouseId: transfer.sourceWarehouseId,
+            locationId: sourceLocationId,
+            productId: line.productId,
+            itemType: line.product.itemType,
+            condition: line.condition,
+          });
+          const current = await inventory.getOrCreateBalance(key);
+          if (current.physicalQty.minus(current.frozenQty).lessThan(quantity))
+            throw new DomainError("Transfer cannot consume frozen inventory.");
+          await inventory.applyDelta(key, { physicalDelta: quantity.negated(), inTransitDelta: quantity });
+          await tx.stockTransaction.create({
+            data: {
+              transactionType: "Transfer_Out",
+              warehouseId: transfer.sourceWarehouseId,
+              sourceLocationId,
+              productId: line.productId,
+              itemType: line.product.itemType,
+              condition: line.condition,
+              quantity,
+              physicalDelta: quantity.negated(),
+              inTransitDelta: quantity,
+              businessReference: transfer.transferNo,
+              operationId: op,
+              remark: "Transfer Out; grouped by source location under one transfer operation.",
+              createdById: who.id,
+            },
+          });
+        }
         for (const link of line.serials) {
           await tx.serialNumber.update({
             where: { id: link.serialNumberId },
@@ -1818,23 +1844,6 @@ export class WmsApplicationService {
           });
           await tx.transferSerial.update({ where: { id: link.id }, data: { dispatchedAt } });
         }
-        await tx.stockTransaction.create({
-          data: {
-            transactionType: "Transfer_Out",
-            warehouseId: transfer.sourceWarehouseId,
-            sourceLocationId,
-            productId: line.productId,
-            itemType: line.product.itemType,
-            condition: line.condition,
-            quantity: line.quantity,
-            physicalDelta: line.quantity.negated(),
-            inTransitDelta: line.quantity,
-            businessReference: transfer.transferNo,
-            operationId: op,
-            remark: "Transfer Out; Preview tracks in-transit quantity on the source balance.",
-            createdById: who.id,
-          },
-        });
       }
       await tx.transferOrder.update({
         where: { id: transfer.id },
@@ -1867,17 +1876,26 @@ export class WmsApplicationService {
       const receivedAt = new Date();
       const op = operationId();
       for (const line of transfer.lines) {
-        const transaction = await tx.stockTransaction.findFirst({
-          where: { businessReference: transfer.transferNo, transactionType: "Transfer_Out", productId: line.productId },
+        const transactions = await tx.stockTransaction.findMany({
+          where: {
+            businessReference: transfer.transferNo,
+            transactionType: "Transfer_Out",
+            productId: line.productId,
+            condition: line.condition,
+          },
         });
-        if (!transaction?.sourceLocationId) throw new DomainError("Transfer source transaction is inconsistent.");
-        const sourceKey = balanceKey({
-          warehouseId: transfer.sourceWarehouseId,
-          locationId: transaction.sourceLocationId,
-          productId: line.productId,
-          itemType: line.product.itemType,
-          condition: line.condition,
-        });
+        if (!transactions.length || transactions.some((transaction) => !transaction.sourceLocationId))
+          throw new DomainError("Transfer source transaction is inconsistent.");
+        for (const transaction of transactions) {
+          const sourceKey = balanceKey({
+            warehouseId: transfer.sourceWarehouseId,
+            locationId: transaction.sourceLocationId!,
+            productId: line.productId,
+            itemType: line.product.itemType,
+            condition: line.condition,
+          });
+          await inventory.applyDelta(sourceKey, { inTransitDelta: transaction.quantity.negated() });
+        }
         const destinationKey = balanceKey({
           warehouseId: transfer.destinationWarehouseId,
           locationId: destination.id,
@@ -1885,7 +1903,6 @@ export class WmsApplicationService {
           itemType: line.product.itemType,
           condition: line.condition,
         });
-        await inventory.applyDelta(sourceKey, { inTransitDelta: line.quantity.negated() });
         await inventory.applyDelta(destinationKey, { physicalDelta: line.quantity });
         for (const link of line.serials) {
           await tx.serialNumber.update({

@@ -136,6 +136,7 @@ export interface TransferOrder {
   status: "Draft" | "Prepared" | "In_Transit" | "Partially_Received" | "Received" | "Exception";
   sku: string;
   model: string;
+  condition: StockCondition;
   qty: number;
   serials: string[];
   sourceLocation?: string;

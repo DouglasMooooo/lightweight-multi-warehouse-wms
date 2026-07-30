@@ -59,6 +59,7 @@ export function BulkSerialPage({ warehouseCode }: { warehouseCode: WarehouseCode
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ text: string; error?: boolean }>();
   const lastScan = useRef<{ value: string; at: number }>({ value: "", at: 0 });
+  const scanInputRef = useRef<HTMLInputElement>(null);
   const serialNumbers = useMemo(
     () => serialText.split(/[\r\n,\t;]+/).map((row) => row.trim().toUpperCase()).filter(Boolean),
     [serialText],
@@ -103,19 +104,60 @@ export function BulkSerialPage({ warehouseCode }: { warehouseCode: WarehouseCode
     setReason("");
   }
 
-  function appendScan(event: FormEvent) {
+  async function appendScan(event: FormEvent) {
     event.preventDefault();
-    const value = scanValue.trim().toUpperCase();
+    const value = scanValue.trim();
     if (!value) return;
     const now = Date.now();
-    if (lastScan.current.value === value && now - lastScan.current.at < 1200) {
+    if (lastScan.current.value === value.toUpperCase() && now - lastScan.current.at < 1200) {
       setMessage({ text: t("scanner.duplicate"), error: true });
       return;
     }
-    lastScan.current = { value, at: now };
-    setSerialText((current) => `${current}${current ? "\n" : ""}${value}`);
-    setScanValue("");
-    setValidation(undefined);
+    lastScan.current = { value: value.toUpperCase(), at: now };
+    setBusy(true);
+    try {
+      const response = await fetch("/api/scans/resolve", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ rawValues: [value] }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? t("common.loadFailed"));
+      const resolved = body.results[0] as {
+        serialNumber: string;
+        sku?: string;
+        model?: string;
+        validationStatus: string;
+        message: string;
+      };
+      if (serialNumbers.includes(resolved.serialNumber)) {
+        setMessage({ text: t("scanner.duplicate"), error: true });
+        return;
+      }
+      if (mode === "NEW_INBOUND" && resolved.validationStatus !== "VALID") {
+        setMessage({ text: resolved.message, error: true });
+        return;
+      }
+      if (resolved.sku && mode !== "FAULTY_RECEIVING") {
+        if (serialNumbers.length && sku && sku !== resolved.sku) {
+          setMessage({ text: t("scanner.skuMismatch"), error: true });
+          return;
+        }
+        setSku(resolved.sku);
+      }
+      setSerialText((current) => `${current}${current ? "\n" : ""}${resolved.serialNumber}`);
+      setScanValue("");
+      setValidation(undefined);
+      setMessage({
+        text: `${resolved.serialNumber} · ${resolved.sku ?? "MANUAL_REVIEW"}${resolved.model ? ` · ${resolved.model}` : ""}`,
+        error: resolved.validationStatus !== "VALID",
+      });
+    } catch (error) {
+      setMessage({ text: error instanceof Error ? error.message : t("common.loadFailed"), error: true });
+    } finally {
+      setBusy(false);
+      window.setTimeout(() => scanInputRef.current?.focus(), 0);
+    }
   }
 
   async function validate(file?: File) {
@@ -310,8 +352,8 @@ export function BulkSerialPage({ warehouseCode }: { warehouseCode: WarehouseCode
           )}
           <form className="field full scanner-row" onSubmit={appendScan}>
             <label>{t("bulk.scan")}</label>
-            <input autoFocus value={scanValue} onChange={(event) => setScanValue(event.target.value.toUpperCase())} placeholder={t("bulk.scanPlaceholder")} />
-            <Button type="submit">{t("bulk.addSn")}</Button>
+            <input ref={scanInputRef} autoFocus value={scanValue} onChange={(event) => setScanValue(event.target.value)} placeholder={t("bulk.scanPlaceholder")} />
+            <Button type="submit" disabled={busy}>{t("bulk.addSn")}</Button>
           </form>
           <div className="field full">
             <label>{t("bulk.serialNumbers")}</label>

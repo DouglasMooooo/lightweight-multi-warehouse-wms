@@ -3,6 +3,7 @@ import "server-only";
 import { Prisma, type PrismaClient } from "@/generated/prisma/client";
 import { deriveWarehouseLocationState } from "@/domain/warehouse-map";
 import { getPrisma } from "@/lib/prisma";
+import { sydWarehouseLayout, sydneyAreaForLocation } from "@/warehouse-layouts/syd";
 
 const number = (value: Prisma.Decimal) => value.toNumber();
 
@@ -76,6 +77,7 @@ export class WarehouseMapService {
 
     const q = query.trim();
     let matchingLocationCodes: string[] = [];
+    let serialMatchingLocationCodes: string[] = [];
     if (q) {
       const upper = q.toUpperCase();
       const direct = rows.filter((row) =>
@@ -105,6 +107,9 @@ export class WarehouseMapService {
         include: { currentLocation: true },
         take: 25,
       });
+      serialMatchingLocationCodes = serialMatches.flatMap((serial) =>
+        serial.currentLocation?.code ? [serial.currentLocation.code] : [],
+      );
       matchingLocationCodes = [...new Set([
         ...direct,
         ...balanceMatches.map((balance) => balance.location.code),
@@ -124,6 +129,69 @@ export class WarehouseMapService {
       summary,
       locations: rows,
       matchingLocationCodes,
+      serialMatchingLocationCodes,
+    };
+  }
+
+  async floor(warehouseCode: string, query = "") {
+    const map = await this.map(warehouseCode, query);
+    const areas = sydWarehouseLayout.map((layout) => {
+      const locations = map.locations.filter((location) => sydneyAreaForLocation(location) === layout.id);
+      const matching = locations.filter((location) => map.matchingLocationCodes.includes(location.code));
+      return {
+        ...layout,
+        physicalQty: locations.reduce((sum, location) => sum + location.physicalQty, 0),
+        frozenQty: locations.reduce((sum, location) => sum + location.frozenQty, 0),
+        occupiedLocations: locations.filter((location) => location.physicalQty > 0).length,
+        locationCount: locations.length,
+        conditionCounts: locations.reduce<Record<string, number>>((result, location) => {
+          for (const condition of location.conditions)
+            result[condition] = (result[condition] ?? 0) + location.physicalQty;
+          return result;
+        }, {}),
+        matchingLocationCodes: matching.map((location) => location.code),
+        matching: matching.length > 0,
+      };
+    });
+    const exactMatch = query
+      ? map.locations.find((location) =>
+          location.code.toUpperCase() === query.trim().toUpperCase() ||
+          map.serialMatchingLocationCodes.includes(location.code),
+        )
+      : undefined;
+    return {
+      warehouse: map.warehouse,
+      summary: map.summary,
+      areas,
+      query,
+      focusLocationCode: exactMatch?.code,
+      focusArea: exactMatch ? sydneyAreaForLocation(exactMatch) : undefined,
+    };
+  }
+
+  async rack(warehouseCode: string, rack: string, query = "") {
+    const map = await this.map(warehouseCode, query);
+    const locations = map.locations.filter((location) => location.rack?.toUpperCase() === rack.toUpperCase());
+    return {
+      warehouse: map.warehouse,
+      rack: rack.toUpperCase(),
+      locations,
+      matchingLocationCodes: map.matchingLocationCodes.filter((code) =>
+        locations.some((location) => location.code === code),
+      ),
+    };
+  }
+
+  async area(warehouseCode: string, area: string, query = "") {
+    const map = await this.map(warehouseCode, query);
+    const locations = map.locations.filter((location) => sydneyAreaForLocation(location) === area.toUpperCase());
+    return {
+      warehouse: map.warehouse,
+      rack: area.toUpperCase(),
+      locations,
+      matchingLocationCodes: map.matchingLocationCodes.filter((code) =>
+        locations.some((location) => location.code === code),
+      ),
     };
   }
 

@@ -1,26 +1,43 @@
 "use client";
 
-import {
-  AlertTriangle,
-  Boxes,
-  Layers3,
-  MapPin,
-  MoveRight,
-  Search,
-  Snowflake,
-  Warehouse,
-  Wrench,
-  X,
-} from "lucide-react";
-import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { ItemType, StockCondition, WarehouseCode } from "@/domain/types";
-import type { WarehouseLocationState } from "@/domain/warehouse-map";
+import { ArrowLeft, Search, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import type { StockCondition, WarehouseCode } from "@/domain/types";
+import { sortRackLocations } from "@/domain/warehouse-map";
 import { useI18n } from "@/i18n/provider";
-import { Button, EmptyState, PageHeader } from "@/components/shared/ui";
 import { StatusBadge } from "@/components/shared/status-badge";
+import { Button, EmptyState, PageHeader } from "@/components/shared/ui";
+import { formatWarehouseDateTime } from "@/lib/warehouse-time";
 
-interface MapLocation {
+type MapView = "Stock" | "Condition" | "Frozen" | "Activity";
+
+interface FloorArea {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  orientation: "horizontal" | "vertical";
+  kind: "rack" | "service";
+  physicalQty: number;
+  frozenQty: number;
+  occupiedLocations: number;
+  locationCount: number;
+  conditionCounts: Record<string, number>;
+  matchingLocationCodes: string[];
+  matching: boolean;
+}
+
+interface FloorData {
+  warehouse: { code: string; name: string; timezone: string };
+  summary: { occupied: number; empty: number; mixed: number; repair: number; prepared: number };
+  areas: FloorArea[];
+  query: string;
+  focusArea?: string;
+  focusLocationCode?: string;
+}
+
+interface RackLocation {
   id: string;
   code: string;
   zone: string;
@@ -34,305 +51,424 @@ interface MapLocation {
   availableQty: number;
   skuCount: number;
   conditions: StockCondition[];
-  itemTypes: ItemType[];
+  itemTypes: string[];
   containerCount: number;
   exceptionCount: number;
   primarySku?: string;
   primaryModel?: string;
-  state: WarehouseLocationState;
+  state: string;
 }
 
-interface MapData {
-  warehouse: { code: string; name: string; timezone: string };
-  summary: { occupied: number; empty: number; mixed: number; repair: number; prepared: number };
-  locations: MapLocation[];
+interface RackData {
+  warehouse: FloorData["warehouse"];
+  rack: string;
+  locations: RackLocation[];
   matchingLocationCodes: string[];
 }
 
 interface LocationDetail {
-  location: Pick<MapLocation, "id" | "code" | "zone" | "rack" | "row" | "bay" | "side" | "serviceZone"> & { warehouseCode: string };
+  location: {
+    code: string;
+    warehouseCode: string;
+    zone: string;
+    rack?: string;
+    row?: number;
+    bay?: number;
+    side?: string;
+    serviceZone: boolean;
+  };
   inventory: Array<{
-    id: string; sku?: string; model: string; itemType: ItemType; condition: StockCondition;
-    physicalQty: number; frozenQty: number; availableQty: number; containerCode?: string;
+    id: string;
+    sku?: string;
+    model: string;
+    itemType: string;
+    condition: StockCondition;
+    physicalQty: number;
+    frozenQty: number;
+    availableQty: number;
+    containerCode?: string;
   }>;
   serialCount: number;
   exceptionCount: number;
   movements: Array<{
-    id: string; operation: string; sku?: string; quantity: number; condition: StockCondition;
-    fromLocation?: string; toLocation?: string; businessReference?: string; effectiveAt: string;
+    id: string;
+    operation: string;
+    sku?: string;
+    quantity: number;
+    condition: StockCondition;
+    fromLocation?: string;
+    toLocation?: string;
+    businessReference?: string;
+    effectiveAt: string;
   }>;
 }
 
-const stateIcon = {
-  Empty: MapPin,
-  Occupied: Boxes,
-  Repair_Good: Boxes,
-  Mixed: Layers3,
-  Repair: Wrench,
-  Frozen: Snowflake,
-  Exception: AlertTriangle,
+const viewClass = (view: MapView, location: RackLocation) => {
+  if (view === "Frozen") return location.frozenQty > 0 ? "awaiting-pickup" : location.physicalQty > 0 ? "muted-stock" : "empty";
+  if (view === "Condition") {
+    if (location.skuCount > 1 || new Set(location.conditions).size > 1) return "condition-mixed";
+    if (location.conditions.includes("Repair_Good")) return "condition-repair-good";
+    if (location.conditions.includes("Repair")) return "condition-repair";
+    if (location.conditions.includes("Material")) return "condition-material";
+    if (location.conditions.includes("New")) return "condition-new";
+  }
+  if (location.exceptionCount > 0) return "exception";
+  return location.physicalQty > 0 ? "occupied" : "empty";
 };
 
-const sideRank = (value?: string) => ({ L: 0, M: 1, R: 2 }[value?.toUpperCase() as "L"] ?? 3);
-
 export function WarehouseMapPage({ warehouse }: { warehouse: WarehouseCode }) {
-  const { t } = useI18n();
-  const [data, setData] = useState<MapData>();
-  const [error, setError] = useState("");
-  const [query, setQuery] = useState(() => typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("q") || "");
-  const initialSearch = useRef(query);
-  const [condition, setCondition] = useState("");
-  const [itemType, setItemType] = useState("");
-  const [status, setStatus] = useState("");
+  const { locale, t } = useI18n();
+  const [query, setQuery] = useState("");
+  const [view, setView] = useState<MapView>("Stock");
+  const [floor, setFloor] = useState<FloorData>();
+  const [selectedArea, setSelectedArea] = useState("");
+  const [rack, setRack] = useState<RackData>();
   const [selectedCode, setSelectedCode] = useState("");
   const [detail, setDetail] = useState<LocationDetail>();
-
-  async function loadMap(search = "") {
-    const response = await fetch(`/api/warehouse-map?warehouse=${warehouse}&q=${encodeURIComponent(search)}`, { cache: "no-store" });
-    if (!response.ok) throw new Error(t("common.loadFailed"));
-    const body = await response.json() as MapData;
-    setData(body);
-    if (search && body.matchingLocationCodes.length === 1) setSelectedCode(body.matchingLocationCodes[0]);
-  }
+  const [error, setError] = useState("");
 
   useEffect(() => {
     const controller = new AbortController();
-    fetch(`/api/warehouse-map?warehouse=${warehouse}&q=${encodeURIComponent(initialSearch.current)}`, { cache: "no-store", signal: controller.signal })
+    const timer = window.setTimeout(() => {
+      const params = new URLSearchParams({ warehouse });
+      if (query) params.set("q", query);
+      fetch(`/api/warehouse-map?${params}`, { cache: "no-store", signal: controller.signal })
+        .then(async (response) => {
+          if (!response.ok) throw new Error(t("common.loadFailed"));
+          const body: FloorData = await response.json();
+          setFloor(body);
+          setError("");
+          if (body.focusArea) {
+            setSelectedArea(body.focusArea);
+            if (body.focusLocationCode) setSelectedCode(body.focusLocationCode);
+          }
+        })
+        .catch((reason) => { if (reason?.name !== "AbortError") setError(reason instanceof Error ? reason.message : t("common.loadFailed")); });
+    }, 180);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [query, t, warehouse]);
+
+  const selectedLayout = floor?.areas.find((area) => area.id === selectedArea);
+  useEffect(() => {
+    if (!selectedArea) return;
+    const controller = new AbortController();
+    const params = new URLSearchParams({
+      warehouse,
+      [selectedLayout?.kind === "rack" ? "rack" : "area"]: selectedArea,
+    });
+    if (query) params.set("q", query);
+    fetch(`/api/warehouse-map?${params}`, { cache: "no-store", signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) throw new Error(t("common.loadFailed"));
-        setData(await response.json());
+        setRack(await response.json());
       })
-      .catch((reason) => {
-        if (reason?.name !== "AbortError")
-          setError(reason instanceof Error ? reason.message : t("common.loadFailed"));
-      });
+      .catch(() => undefined);
     return () => controller.abort();
-  }, [t, warehouse]);
+  }, [query, selectedArea, selectedLayout?.kind, t, warehouse]);
 
   useEffect(() => {
     if (!selectedCode) return;
-    fetch(`/api/warehouse-map?warehouse=${warehouse}&location=${encodeURIComponent(selectedCode)}`, { cache: "no-store" })
+    const controller = new AbortController();
+    fetch(`/api/warehouse-map?warehouse=${warehouse}&location=${encodeURIComponent(selectedCode)}`, {
+      cache: "no-store",
+      signal: controller.signal,
+    })
       .then(async (response) => {
         if (!response.ok) throw new Error(t("common.loadFailed"));
         setDetail(await response.json());
       })
-      .catch((reason) => setError(reason instanceof Error ? reason.message : t("common.loadFailed")));
+      .catch(() => undefined);
+    return () => controller.abort();
   }, [selectedCode, t, warehouse]);
 
-  const filtered = useMemo(() => (data?.locations ?? []).filter((location) =>
-    (!condition || location.conditions.includes(condition as StockCondition)) &&
-    (!itemType || location.itemTypes.includes(itemType as ItemType)) &&
-    (!status ||
-      (status === "Occupied" && location.state !== "Empty") ||
-      (status === "Empty" && location.state === "Empty") ||
-      (status === "Frozen" && location.frozenQty > 0) ||
-      (status === "Exception" && location.exceptionCount > 0) ||
-      (status === "Mixed" && location.state === "Mixed"))
-  ), [condition, data?.locations, itemType, status]);
-  const rackGroups = useMemo(() => {
-    const groups = new Map<string, MapLocation[]>();
-    for (const location of filtered.filter((row) => !row.serviceZone && row.rack)) {
-      const rows = groups.get(location.rack!) ?? [];
-      rows.push(location);
-      groups.set(location.rack!, rows);
-    }
-    return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
-  }, [filtered]);
-  const serviceLocations = filtered.filter((location) => location.serviceZone || !location.rack);
-  const highlighted = new Set(data?.matchingLocationCodes ?? []);
+  const serviceLocations = useMemo(
+    () => selectedLayout?.kind === "service" ? rack?.locations ?? [] : [],
+    [rack?.locations, selectedLayout?.kind],
+  );
 
-  if (error && !data) return <div className="notice error">{error}</div>;
   return (
     <>
       <PageHeader
-        title={t("map.title")}
-        subtitle={t("map.subtitle")}
-        badge={<span className="map-live"><span />{t("map.liveInventory")}</span>}
+        title={t("map.floorPlan")}
+        subtitle={t("map.floorHelp")}
+        actions={<div className="map-view-switch" role="group" aria-label={t("map.title")}>
+          {(["Stock", "Condition", "Frozen", "Activity"] as MapView[]).map((value) => (
+            <Button
+              type="button"
+              className={view === value ? "primary" : ""}
+              disabled={value === "Activity"}
+              title={value === "Activity" ? t("map.activityExperimental") : undefined}
+              onClick={() => setView(value)}
+              key={value}
+            >
+              {t(value === "Stock" ? "map.stockView" : value === "Condition" ? "map.conditionView" : value === "Frozen" ? "map.frozenView" : "map.activityView")}
+            </Button>
+          ))}
+        </div>}
       />
-      <form className="map-searchbar" onSubmit={(event) => {
-        event.preventDefault();
-        loadMap(query).catch((reason) => setError(reason instanceof Error ? reason.message : t("common.loadFailed")));
-      }}>
-        <Search />
-        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("map.searchPlaceholder")} />
-        <Button className="primary" type="submit">{t("map.highlight")}</Button>
-      </form>
-      <div className="map-filterbar">
-        <select aria-label={t("common.condition")} value={condition} onChange={(event) => setCondition(event.target.value)}>
-          <option value="">{t("map.allConditions")}</option>
-          {["New", "Repair_Good", "Repair", "Material"].map((value) => <option value={value} key={value}>{t(`status.${value}`)}</option>)}
-        </select>
-        <select aria-label={t("field.itemType")} value={itemType} onChange={(event) => setItemType(event.target.value)}>
-          <option value="">{t("map.allItemTypes")}</option>
-          <option value="Product">{t("status.Product")}</option>
-          <option value="Material">{t("status.Material")}</option>
-        </select>
-        <select aria-label={t("common.status")} value={status} onChange={(event) => setStatus(event.target.value)}>
-          <option value="">{t("map.allStates")}</option>
-          {["Occupied", "Empty", "Frozen", "Exception", "Mixed"].map((value) => <option value={value} key={value}>{t(`map.state.${value}`)}</option>)}
-        </select>
-        {(condition || itemType || status) && <Button type="button" onClick={() => { setCondition(""); setItemType(""); setStatus(""); }}>{t("map.clearFilters")}</Button>}
+      <div className="warehouse-map-toolbar">
+        <div className="search-wrap map-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("map.searchPlaceholder")} /></div>
+        {floor && <div className="map-summary-strip">
+          <span><b>{floor.summary.occupied}</b>{t("map.occupied")}</span>
+          <span><b>{floor.summary.empty}</b>{t("map.empty")}</span>
+          <span><b>{floor.summary.prepared}</b>{t("map.frozenView")}</span>
+        </div>}
       </div>
-      {data ? (
-        <>
-          <div className="map-summary-strip">
-            {[
-              ["occupied", data.summary.occupied],
-              ["empty", data.summary.empty],
-              ["mixed", data.summary.mixed],
-              ["repair", data.summary.repair],
-              ["frozen", data.summary.prepared],
-            ].map(([key, value]) => <div key={key}><strong>{value}</strong><span>{t(`map.summary.${key}`)}</span></div>)}
-          </div>
-          <div className="warehouse-floor">
-            <section className="service-area">
-              <div className="map-section-head"><div><span>{t("map.serviceZones")}</span><strong>{t("map.operationalAreas")}</strong></div></div>
-              <div className="service-grid">
-                {serviceLocations.map((location) => (
-                  <LocationCell
-                    location={location}
-                    highlighted={highlighted.has(location.code)}
-                    dimmed={highlighted.size > 0 && !highlighted.has(location.code)}
-                    selected={selectedCode === location.code}
+      {error && <div className="notice error">{error}</div>}
+      {!floor && !error && <div className="map-skeleton" aria-label={t("common.loading")} />}
+      {floor && (
+        <section className="warehouse-visual-shell">
+          {!selectedArea ? (
+            <WarehouseFloorPlan
+              areas={floor.areas}
+              hasQuery={Boolean(query)}
+              view={view}
+              onSelect={(area) => setSelectedArea(area)}
+              t={t}
+            />
+          ) : (
+            <div className="warehouse-level-two">
+              <div className="map-level-head">
+                <Button type="button" onClick={() => { setSelectedArea(""); setRack(undefined); }}>
+                  <ArrowLeft /> {t("map.backToFloor")}
+                </Button>
+                <div><span>{selectedLayout?.kind === "rack" ? t("map.rackView") : t("map.floorPlan")}</span><h2>{selectedArea}</h2></div>
+                {query && <div className="map-focus-note">{t("map.searchFocus", { location: floor.focusLocationCode ?? selectedArea })}</div>}
+              </div>
+              {selectedLayout?.kind === "rack" && rack
+                ? <RackElevation
+                    rack={rack}
+                    view={view}
+                    hasQuery={Boolean(query)}
+                    selectedCode={selectedCode}
                     onSelect={setSelectedCode}
                     t={t}
-                    service
-                    key={location.id}
                   />
-                ))}
-              </div>
-            </section>
-            <section className="rack-area">
-              <div className="map-section-head"><div><span>{t("map.rackStorage")}</span><strong>{data.warehouse.code} · {data.warehouse.name}</strong></div><small>{t("map.rowOrientation")}</small></div>
-              {rackGroups.map(([rack, locations]) => {
-                const rows = [...new Set(locations.map((location) => location.row).filter((value): value is number => value !== undefined))].sort((a, b) => b - a);
-                const bays = [...new Set(locations.map((location) => location.bay).filter((value): value is number => value !== undefined))].sort((a, b) => a - b);
-                return (
-                  <div className="rack-block" key={rack}>
-                    <div className="rack-name"><Warehouse />{rack}</div>
-                    <div className="rack-grid" style={{ gridTemplateColumns: `64px repeat(${Math.max(1, bays.length)}, minmax(118px, 1fr))` }}>
-                      <div />
-                      {bays.map((bay) => <div className="bay-heading" key={bay}>{t("map.bay", { bay })}</div>)}
-                      {rows.flatMap((row) => [
-                        <div className="row-heading" key={`row:${row}`}>{t("map.row", { row })}</div>,
-                        ...bays.map((bay) => {
-                          const slots = locations
-                            .filter((location) => location.row === row && location.bay === bay)
-                            .sort((a, b) => sideRank(a.side) - sideRank(b.side));
-                          return (
-                            <div className="bay-cell" key={`${row}:${bay}`}>
-                              {slots.map((location) => (
-                                <LocationCell
-                                  location={location}
-                                  highlighted={highlighted.has(location.code)}
-                                  dimmed={highlighted.size > 0 && !highlighted.has(location.code)}
-                                  selected={selectedCode === location.code}
-                                  onSelect={setSelectedCode}
-                                  t={t}
-                                  key={location.id}
-                                />
-                              ))}
-                              {!slots.length && <span className="bay-empty">—</span>}
-                            </div>
-                          );
-                        }),
-                      ])}
-                    </div>
-                  </div>
-                );
-              })}
-              {!rackGroups.length && <EmptyState label={t("map.noRackLocations")} />}
-            </section>
-          </div>
-        </>
-      ) : <div className="map-skeleton" aria-label={t("common.loading")} />}
-      {selectedCode && (
-        <aside className="location-drawer" aria-label={t("map.locationDetail")}>
-          <div className="drawer-head"><div><span>{t("map.locationDetail")}</span><h3 className="mono">{selectedCode}</h3></div><button type="button" onClick={() => { setSelectedCode(""); setDetail(undefined); }} aria-label={t("common.cancel")}><X /></button></div>
-          {detail ? (
-            <div className="drawer-content">
-              <div className="drawer-balance-summary">
-                <div><span>{t("common.physical")}</span><strong>{detail.inventory.reduce((sum, row) => sum + row.physicalQty, 0)}</strong></div>
-                <div><span>{t("common.frozen")}</span><strong>{detail.inventory.reduce((sum, row) => sum + row.frozenQty, 0)}</strong></div>
-                <div><span>{t("common.available")}</span><strong>{detail.inventory.reduce((sum, row) => sum + row.availableQty, 0)}</strong></div>
-              </div>
-              <dl className="location-attributes">
-                <div><dt>{t("common.zone")}</dt><dd>{detail.location.zone}</dd></div>
-                <div><dt>{t("map.coordinates")}</dt><dd>{[detail.location.rack, detail.location.row, detail.location.bay, detail.location.side].filter((value) => value !== null && value !== undefined).join(" / ") || t("map.serviceZone")}</dd></div>
-                <div><dt>{t("map.snCount")}</dt><dd>{detail.serialCount}</dd></div>
-                <div><dt>{t("map.exceptions")}</dt><dd>{detail.exceptionCount}</dd></div>
-              </dl>
-              <div className="drawer-section-title">{t("nav.inventory")}</div>
-              {detail.inventory.length ? <div className="drawer-stock-table"><table>
-                <thead><tr><th>{t("report.sku")}</th><th>{t("common.condition")}</th><th className="number">{t("common.physical")}</th><th className="number">{t("common.frozen")}</th><th className="number">{t("common.available")}</th></tr></thead>
-                <tbody>{detail.inventory.map((row) => <tr key={row.id}>
-                  <td><strong className="mono">{row.sku ?? "—"}</strong><span>{row.model}</span></td>
-                  <td><StatusBadge code={row.condition} /></td>
-                  <td className="number">{row.physicalQty}</td>
-                  <td className="number">{row.frozenQty}</td>
-                  <td className="number strong">{row.availableQty}</td>
-                </tr>)}</tbody>
-              </table></div> : <EmptyState label={t("map.emptyLocation")} />}
-              {detail.inventory.some((row) => row.containerCode) && <>
-                <div className="drawer-section-title">{t("map.containers")}</div>
-                <div className="container-chips">{[...new Set(detail.inventory.flatMap((row) => row.containerCode ? [row.containerCode] : []))].map((code) => <span className="mono" key={code}>{code}</span>)}</div>
-              </>}
-              <div className="drawer-actions">
-                <Link className="btn primary" href={`/inventory?location=${encodeURIComponent(selectedCode)}`}>{t("map.openInventory")}</Link>
-                <Link className="btn" href={`/move?from=${encodeURIComponent(selectedCode)}`}><MoveRight />{t("map.moveStock")}</Link>
-              </div>
-              <div className="drawer-section-title">{t("map.lastMovements")}</div>
-              <div className="movement-list">
-                {detail.movements.map((movement) => <div key={movement.id}><strong>{movement.operation}</strong><span>{movement.sku ?? "—"} · {movement.quantity} · {movement.businessReference ?? "—"}</span></div>)}
-                {!detail.movements.length && <div className="subtle">{t("map.noMovements")}</div>}
-              </div>
+                : <ServiceAreaView area={selectedLayout} locations={serviceLocations} onSelect={setSelectedCode} t={t} />}
             </div>
-          ) : <div className="drawer-loading">{t("common.loading")}</div>}
-        </aside>
+          )}
+        </section>
+      )}
+      <MapLegend view={view} t={t} />
+      {selectedCode && (
+        <LocationDrawer
+          detail={detail}
+          locale={locale}
+          timeZone={floor?.warehouse.timezone ?? "Australia/Sydney"}
+          onClose={() => { setSelectedCode(""); setDetail(undefined); }}
+          t={t}
+        />
       )}
     </>
   );
 }
 
-function LocationCell({
-  location,
-  highlighted,
-  dimmed,
-  selected,
+function WarehouseFloorPlan({
+  areas,
+  hasQuery,
+  view,
   onSelect,
   t,
-  service = false,
 }: {
-  location: MapLocation;
-  highlighted: boolean;
-  dimmed: boolean;
-  selected: boolean;
+  areas: FloorArea[];
+  hasQuery: boolean;
+  view: MapView;
+  onSelect: (area: string) => void;
+  t: (key: string, values?: Record<string, string | number>) => string;
+}) {
+  return (
+    <div className={`warehouse-floor-plan view-${view.toLowerCase()}`}>
+      <svg viewBox="0 0 824 460" role="img" aria-label={t("map.floorPlan")} preserveAspectRatio="xMidYMid meet">
+        <rect className="floor-boundary" x="12" y="12" width="800" height="436" rx="2" />
+        <path className="floor-aisle" d="M214 24V436 M510 24V436 M24 246H800" />
+        <path className="floor-flow" d="M112 244H700 M503 244l-16-10v20z" />
+        {areas.map((area) => {
+          const conditionEntries = Object.entries(area.conditionCounts).filter(([, quantity]) => quantity > 0);
+          const dominant = conditionEntries.length > 1
+            ? "mixed"
+            : conditionEntries[0]?.[0]?.toLowerCase().replace("_", "-");
+          const state = view === "Frozen"
+            ? area.frozenQty > 0 ? "awaiting-pickup" : "quiet"
+            : view === "Condition" && dominant ? `condition-${dominant}` : area.physicalQty > 0 ? "occupied" : "empty";
+          return (
+            <g
+              className={`floor-area ${state} ${area.kind} ${area.matching ? "matched" : ""} ${hasQuery && !area.matching ? "dimmed" : ""}`}
+              role="button"
+              tabIndex={0}
+              aria-label={`${area.id}, ${area.physicalQty}`}
+              onClick={() => onSelect(area.id)}
+              onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onSelect(area.id); }}
+              key={area.id}
+            >
+              <rect x={area.x} y={area.y} width={area.width} height={area.height} rx="3" />
+              {area.kind === "rack" && Array.from({ length: 5 }, (_, index) => (
+                <line x1={area.x + 18 + index * ((area.width - 36) / 4)} y1={area.y + 40} x2={area.x + 18 + index * ((area.width - 36) / 4)} y2={area.y + area.height - 16} key={index} />
+              ))}
+              <text className="area-name" x={area.x + 16} y={area.y + 26}>{area.id}</text>
+              <text className="area-stat" x={area.x + 16} y={area.y + area.height - 30}>{t("map.occupiedLocations", { count: area.occupiedLocations })}</text>
+              <text className="area-stat secondary" x={area.x + 16} y={area.y + area.height - 14}>{t("map.frozenLocations", { count: area.frozenQty })}</text>
+              {area.matching && <circle className="area-match-pulse" cx={area.x + area.width - 18} cy={area.y + 20} r="7" />}
+            </g>
+          );
+        })}
+        <text className="floor-caption" x="26" y="440">SYD · OPERATIONAL FLOOR · NOT TO SCALE</text>
+      </svg>
+    </div>
+  );
+}
+
+function RackElevation({
+  rack,
+  view,
+  hasQuery,
+  selectedCode,
+  onSelect,
+  t,
+}: {
+  rack: RackData;
+  view: MapView;
+  hasQuery: boolean;
+  selectedCode: string;
   onSelect: (code: string) => void;
   t: (key: string, values?: Record<string, string | number>) => string;
-  service?: boolean;
 }) {
-  const Icon = stateIcon[location.state];
+  const locations = sortRackLocations(rack.locations);
+  const rows = [...new Set(locations.map((location) => location.row).filter((value): value is number => value != null))].sort((a, b) => b - a);
+  const bays = [...new Set(locations.map((location) => location.bay).filter((value): value is number => value != null))].sort((a, b) => a - b);
+  const sideOrder = ["L", "M", "R"];
+  const bayWidth = 156;
+  const rowHeight = 78;
+  const width = 110 + bays.length * bayWidth;
+  const height = 92 + rows.length * rowHeight;
   return (
-    <button
-      className={`map-location state-${location.state.toLowerCase()} ${service ? "service" : ""} ${highlighted ? "highlighted" : ""} ${dimmed ? "dimmed" : ""} ${selected ? "selected" : ""}`}
-      type="button"
-      onClick={() => onSelect(location.code)}
-      aria-label={`${location.code} · ${t(`map.state.${location.state}`)}`}
-    >
-      <div className="location-code"><span>{location.side ?? location.code}</span><Icon /></div>
-      {!service && <small className="mono">{location.code}</small>}
-      <strong>{location.skuCount > 1 ? t("map.mixedSku", { count: location.skuCount }) : location.primaryModel ?? t("map.empty")}</strong>
-      <div className="location-qty">{location.physicalQty > 0 ? `× ${location.physicalQty}` : "—"}<span>{t(`map.state.${location.state}`)}</span></div>
-      <span className="location-tooltip" role="tooltip">
-        <b className="mono">{location.code}</b>
-        <span>{location.skuCount > 1 ? t("map.mixedSku", { count: location.skuCount }) : location.primarySku ?? t("map.empty")}</span>
-        <span>{t(`map.state.${location.state}`)}</span>
-        <span className="tooltip-metrics">
-          <span><b>{t("common.physical")}</b><em>{location.physicalQty}</em></span>
-          <span><b>{t("common.frozen")}</b><em>{location.frozenQty}</em></span>
-          <span><b>{t("common.available")}</b><em>{location.availableQty}</em></span>
-        </span>
-      </span>
-    </button>
+    <div className={`rack-elevation view-${view.toLowerCase()}`}>
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={t("map.rackElevation", { rack: rack.rack })}>
+        <line className="rack-ground" x1="84" y1={height - 20} x2={width - 20} y2={height - 20} />
+        {bays.map((bay, bayIndex) => (
+          <text className="bay-label" x={110 + bayIndex * bayWidth + bayWidth / 2} y="30" textAnchor="middle" key={bay}>
+            {t("map.bay", { bay })}
+          </text>
+        ))}
+        {rows.map((row, rowIndex) => (
+          <g key={row}>
+            <text className="row-label" x="68" y={72 + rowIndex * rowHeight + 29} textAnchor="end">{t("map.row", { row })}</text>
+            {bays.map((bay, bayIndex) => (
+              <g key={bay}>
+                {sideOrder.map((side, sideIndex) => {
+                  const location = locations.find((candidate) => candidate.row === row && candidate.bay === bay && candidate.side === side);
+                  if (!location) return null;
+                  const x = 92 + bayIndex * bayWidth + sideIndex * 48;
+                  const y = 52 + rowIndex * rowHeight;
+                  const matching = rack.matchingLocationCodes.includes(location.code);
+                  return (
+                    <g
+                      className={`rack-slot ${viewClass(view, location)} ${matching ? "matched" : ""} ${hasQuery && !matching ? "dimmed" : ""} ${selectedCode === location.code ? "selected" : ""}`}
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`${location.code}, ${location.physicalQty}`}
+                      onClick={() => onSelect(location.code)}
+                      onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onSelect(location.code); }}
+                      key={location.code}
+                    >
+                      <title>{`${location.code}\n${location.skuCount > 1 ? `Mixed · ${location.skuCount} SKU` : `${location.primaryModel ?? "Empty"}\n${location.conditions.join(", ")}`}\nPhysical ${location.physicalQty} · Frozen ${location.frozenQty} · Available ${location.availableQty}`}</title>
+                      <rect x={x} y={y} width="43" height="58" rx="1" />
+                      <text className="slot-side" x={x + 21.5} y={y + 19} textAnchor="middle">{side}</text>
+                      <text className="slot-value" x={x + 21.5} y={y + 42} textAnchor="middle">
+                        {location.skuCount > 1 ? t("map.slotMixed") : location.physicalQty || "—"}
+                      </text>
+                      {location.frozenQty > 0 && <path className="slot-frozen-mark" d={`M${x + 32} ${y}h11v11z`} />}
+                    </g>
+                  );
+                })}
+              </g>
+            ))}
+          </g>
+        ))}
+      </svg>
+    </div>
+  );
+}
+
+function ServiceAreaView({
+  area,
+  locations,
+  onSelect,
+  t,
+}: {
+  area?: FloorArea;
+  locations: RackLocation[];
+  onSelect: (code: string) => void;
+  t: (key: string, values?: Record<string, string | number>) => string;
+}) {
+  return (
+    <div className="service-area-view">
+      <svg viewBox="0 0 820 260" role="img" aria-label={area?.id ?? ""}>
+        <rect className="service-boundary" x="24" y="30" width="772" height="190" />
+        <text className="service-title" x="50" y="70">{area?.id}</text>
+        <text className="service-stat" x="50" y="108">{t("map.units", { count: area?.physicalQty ?? 0 })}</text>
+        <text className="service-stat" x="50" y="138">{t("map.frozenLocations", { count: area?.frozenQty ?? 0 })}</text>
+        <path className="service-flow" d="M260 126H710m-18-12 18 12-18 12" />
+        {locations.map((location, index) => (
+          <g role="button" tabIndex={0} onClick={() => onSelect(location.code)} onKeyDown={(event) => { if (event.key === "Enter") onSelect(location.code); }} key={location.code}>
+            <rect className="service-location" x={270 + index * 92} y="156" width="82" height="42" />
+            <text className="service-location-code" x={311 + index * 92} y="181" textAnchor="middle">{location.code}</text>
+          </g>
+        ))}
+      </svg>
+    </div>
+  );
+}
+
+function MapLegend({ view, t }: { view: MapView; t: (key: string) => string }) {
+  const items = view === "Condition"
+    ? [["condition-new", "map.legend.new"], ["condition-repair-good", "map.legend.repairGood"], ["condition-repair", "map.legend.repair"], ["condition-material", "map.legend.material"], ["condition-mixed", "map.legend.mixed"]]
+    : view === "Frozen"
+      ? [["awaiting-pickup", "map.legend.awaitingPickup"], ["muted-stock", "map.legend.empty"]]
+      : [["occupied", "map.legend.new"], ["empty", "map.legend.empty"], ["exception", "status.Exception"]];
+  return <div className="map-legend">{items.map(([className, key]) => <span key={key}><i className={className} />{t(key)}</span>)}</div>;
+}
+
+function LocationDrawer({
+  detail,
+  locale,
+  timeZone,
+  onClose,
+  t,
+}: {
+  detail?: LocationDetail;
+  locale: "en" | "zh-CN";
+  timeZone: string;
+  onClose: () => void;
+  t: (key: string, values?: Record<string, string | number>) => string;
+}) {
+  const totals = detail?.inventory.reduce((sum, row) => ({
+    physical: sum.physical + row.physicalQty,
+    frozen: sum.frozen + row.frozenQty,
+    available: sum.available + row.availableQty,
+  }), { physical: 0, frozen: 0, available: 0 });
+  return (
+    <aside className="location-drawer" aria-label={t("map.locationDetail")}>
+      <div className="drawer-head"><div><span>{t("map.locationDetail")}</span><h3 className="mono">{detail?.location.code ?? "…"}</h3></div><button type="button" onClick={onClose} aria-label={t("common.cancel")}><X /></button></div>
+      {!detail ? <div className="drawer-loading">{t("common.loading")}</div> : <>
+        <div className="drawer-coordinate">
+          <span>{detail.location.rack ?? detail.location.zone}</span>
+          <span>{detail.location.row != null ? t("map.row", { row: detail.location.row }) : detail.location.zone}</span>
+          <span>{detail.location.bay != null ? t("map.bay", { bay: detail.location.bay }) : detail.location.warehouseCode}</span>
+          <span>{detail.location.side ?? "—"}</span>
+        </div>
+        <div className="drawer-balance-summary">
+          <div><span>{t("common.physical")}</span><strong>{totals?.physical ?? 0}</strong></div>
+          <div><span>{t("common.frozen")}</span><strong>{totals?.frozen ?? 0}</strong></div>
+          <div><span>{t("common.available")}</span><strong>{totals?.available ?? 0}</strong></div>
+        </div>
+        <div className="drawer-meta-strip"><span>SN {detail.serialCount}</span><span>{t("table.container")} {new Set(detail.inventory.flatMap((row) => row.containerCode ? [row.containerCode] : [])).size}</span><span>{t("nav.exceptions")} {detail.exceptionCount}</span></div>
+        <h4>{t("map.inventoryHere")}</h4>
+        {detail.inventory.length ? <div className="drawer-stock-table"><table><thead><tr><th>SKU / {t("common.model")}</th><th>{t("common.condition")}</th><th>{t("table.container")}</th><th>{t("common.physical")}</th><th>{t("common.frozen")}</th><th>{t("common.available")}</th></tr></thead><tbody>
+          {detail.inventory.map((row) => <tr key={row.id}><td><b className="mono">{row.sku ?? "—"}</b><small>{row.model}</small></td><td><StatusBadge code={row.condition} /></td><td className="mono">{row.containerCode ?? "—"}</td><td>{row.physicalQty}</td><td>{row.frozenQty}</td><td>{row.availableQty}</td></tr>)}
+        </tbody></table></div> : <EmptyState label={t("map.emptyLocation")} />}
+        <h4>{t("map.recentMovements")}</h4>
+        <div className="drawer-movements">{detail.movements.map((movement) => <div key={movement.id}><span><StatusBadge code={movement.operation} /> {movement.sku ?? movement.condition}</span><b>{movement.quantity}</b><small>{movement.fromLocation ?? "—"} → {movement.toLocation ?? "—"} · {formatWarehouseDateTime(movement.effectiveAt, locale, timeZone)}</small></div>)}</div>
+      </>}
+    </aside>
   );
 }

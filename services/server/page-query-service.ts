@@ -69,6 +69,8 @@ export class PageQueryService {
         allocated: count(["Allocated"]),
         prepared: count(["Prepared", "Partially_Prepared"]),
         readyForPickup: count(["Ready_for_Pickup"]),
+        toPrepare: count(["Imported", "Pending_Allocation", "Allocated"]),
+        awaitingPickup: count(["Prepared", "Ready_for_Pickup"]),
         outboundToday,
         faultyReturns,
         repairQueue,
@@ -201,12 +203,21 @@ export class PageQueryService {
   async outbound(input: { page?: number; pageSize?: number; warehouse?: string; status?: string; history?: boolean }) {
     const { page, pageSize } = boundedPage(input.page, input.pageSize);
     const active = ["Imported", "Pending_Allocation", "Allocated", "Prepared", "Partially_Prepared", "Ready_for_Pickup"];
+    const queueStatuses =
+      input.status === "To_Prepare" ? ["Draft", "Ready", "Imported", "Pending_Allocation", "Allocated"] :
+      input.status === "Partially_Prepared" ? ["Partially_Prepared"] :
+      input.status === "Awaiting_Pickup" ? ["Prepared", "Ready_for_Pickup"] :
+      input.status === "Outbound" ? ["Outbound", "ERP_Synced"] :
+      undefined;
     const where: Prisma.OutboundOrderWhereInput = {
       warehouse: input.warehouse ? { code: input.warehouse } : undefined,
-      status: input.status === "Needs"
-        ? { in: ["Imported", "Pending_Allocation"] }
-        : input.status
-          ? input.status as Prisma.OutboundOrderWhereInput["status"]
+      erpSyncStatus: input.status === "ERP_Issues" ? { in: ["Failed", "Manual_Review", "Retrying"] } : undefined,
+      status: queueStatuses
+        ? { in: queueStatuses as never[] }
+        : input.status === "ERP_Issues"
+          ? undefined
+          : input.status
+            ? input.status as Prisma.OutboundOrderWhereInput["status"]
           : input.history
             ? { in: ["Outbound", "ERP_Synced", "Cancelled"] }
             : { in: active as never[] },
@@ -384,6 +395,7 @@ export class PageQueryService {
           destinationWarehouse: order.destinationWarehouse.code,
           status: order.status === "Dispatched" ? "In_Transit" : order.status === "Cancelled" ? "Exception" : order.status,
           sku: line.product.sku, model: line.product.model, qty: number(line.quantity),
+          condition: line.condition,
           serials: line.serials.map((item) => item.serialNumber.serialNumber),
           sourceLocation: sourceTransactions.find((transaction) =>
             transaction.businessReference === order.transferNo && transaction.productId === line.productId

@@ -77,3 +77,14 @@ Until explicit cutover approval, the workbook remains the production operational
 - Productless or unresolved balance rows cannot be placed in a SKU report without inventing product identity, so they remain reconciliation concerns rather than report rows.
 - CSV export applies the active server-side filters and exposes the same business quantities as the report.
 - The Vercel Preview continues to use the Mock ERP adapter; real Kingdee connectivity remains blocked on an approved contract and credentials.
+
+## Sprint 6 operations V2 decisions
+
+- Internal outbound enums remain stable. Operator presentation maps Imported, Pending Allocation and Allocated to `To Prepare`; Prepared and Ready for Pickup map to `Awaiting Pickup`. This resolves the workbook's overloaded Prepared wording without rewriting ledger history.
+- The workbook label prototype is output evidence, not a mutation workflow. Pickup Code is the first grouping key; only identical SKU + Model + ERP Warehouse rows aggregate. Missing Pickup Code falls back to SH No and never creates a synthetic code.
+- The explicit Sprint 6 rule extends the workbook's SH-oriented label examples across all SH documents sharing one Pickup Code. Different ERP warehouse classes remain distinct rows on the same A4 page.
+- QR parsing accepts structured key/value payloads, a recognised SKU-and-SN pipe format, and plain SN. Unresolved values remain Manual Review; neither the parser nor scanner UI infers product identity from serial text.
+- New inbound remains a single-product logical batch because the validated inventory service posts one product/condition/location balance grain per operation. The scanner resolves the SKU automatically and rejects a second SKU into the same batch rather than silently splitting inventory effects.
+- Transfer receipt is all-or-nothing in this Preview: every transfer SN must be scanned exactly once before confirmation. Partial receipt remains represented in the domain enum but is not exposed until a controlled partial-receipt policy is approved.
+- Sydney floor geometry is presentation-only configuration. Quantities, conditions, frozen state, search results and location detail are calculated from PostgreSQL; no capacity percentage is shown because no approved capacity master exists.
+- Activity Map remains disabled because the current bounded map query does not yet supply a reliable period-normalized activity metric.
