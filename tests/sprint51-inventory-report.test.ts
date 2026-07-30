@@ -15,16 +15,19 @@ vi.mock("server-only", () => ({}));
 const balanceInputs = [
   {
     warehouseCode: "SYD", productId: "p1", sku: "SKU-P", model: "EQ4800-S", itemType: "Product" as const,
+    serialTrackingRequired: true,
     condition: "New" as const, locationId: "l1", physicalQty: 10, frozenQty: 2, inTransitQty: 1,
     legacySerialGap: false,
   },
   {
     warehouseCode: "SYD", productId: "p1", sku: "SKU-P", model: "EQ4800-S", itemType: "Product" as const,
+    serialTrackingRequired: true,
     condition: "Repair_Good" as const, locationId: "l2", physicalQty: 3, frozenQty: 0, inTransitQty: 0,
     legacySerialGap: true,
   },
   {
     warehouseCode: "SYD", productId: "m1", sku: "SKU-M", model: "Packing Material", itemType: "Material" as const,
+    serialTrackingRequired: false,
     condition: "Material" as const, locationId: "l3", physicalQty: 20, frozenQty: 5, inTransitQty: 0,
     legacySerialGap: false,
   },
@@ -60,6 +63,7 @@ describe("Sprint 5.1 product inventory reporting", () => {
     const rows = aggregateInventoryReport(balanceInputs);
     expect(applyInventoryReportFilters(rows, { itemType: "Product" }).map((row) => row.sku)).toEqual(["SKU-P"]);
     expect(applyInventoryReportFilters(rows, { itemType: "Material" }).map((row) => row.sku)).toEqual(["SKU-M"]);
+    expect(rows.find((row) => row.sku === "SKU-M")?.serialCoverageGap).toBe(0);
   });
 
   it("exports only the currently filtered report rows", () => {

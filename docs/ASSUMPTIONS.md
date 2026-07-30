@@ -67,3 +67,13 @@ Until explicit cutover approval, the workbook remains the production operational
 - Locations without rack coordinates render outside the rack grid; known service zones render as separate operational blocks.
 - The data model has no physical capacity field. Warehouse Map reports inventory state and quantities only, never a utilization percentage.
 - Initial map responses intentionally omit serial objects. SN location resolution is a bounded server-side search performed only when an operator supplies a query.
+
+## Sprint 5.1 reporting decisions
+
+- `InventoryBalance` is the quantity authority for Product Inventory Report aggregation; the immutable ledger remains the reconciliation source.
+- Known SN coverage counts only the shared physically-present serial statuses. Allocatable status is intentionally stricter and is not substituted for physical presence.
+- Items with `serialTrackingRequired=false` display `Not tracked` and never create a serial coverage defect.
+- `legacySerialGap` is shown separately and does not excuse a current balance or serial reconciliation failure.
+- Productless or unresolved balance rows cannot be placed in a SKU report without inventing product identity, so they remain reconciliation concerns rather than report rows.
+- CSV export applies the active server-side filters and exposes the same business quantities as the report.
+- The Vercel Preview continues to use the Mock ERP adapter; real Kingdee connectivity remains blocked on an approved contract and credentials.

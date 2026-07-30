@@ -29,6 +29,7 @@
   "report.coverage": "SN 覆盖",
   "report.legacyGap": "历史缺口",
   "report.currentCoverage": "{count} 个未覆盖",
+  "report.notTracked": "无需追踪",
   "report.empty": "没有符合当前筛选条件的产品。",
   "report.productDetail": "产品库存详情",
   "report.snCoverage": "SN 覆盖",

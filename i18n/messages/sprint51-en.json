@@ -29,6 +29,7 @@
   "report.coverage": "SN Coverage",
   "report.legacyGap": "Legacy Gap",
   "report.currentCoverage": "{count} uncovered",
+  "report.notTracked": "Not tracked",
   "report.empty": "No products match the current report filters.",
   "report.productDetail": "Product Inventory Detail",
   "report.snCoverage": "SN Coverage",

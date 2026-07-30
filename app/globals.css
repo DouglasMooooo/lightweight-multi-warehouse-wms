@@ -637,10 +637,10 @@ tbody tr:last-child td { border-bottom: 0; }
 .map-location:hover .location-tooltip, .map-location:focus-visible .location-tooltip { display: grid; gap: 4px; }
 .location-tooltip > b { font-size: 11px; }
 .location-tooltip > span { color: #d5e3df; font-size: 10px; }
-.location-tooltip dl { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin: 6px 0 0; }
-.location-tooltip dl div { padding-top: 5px; border-top: 1px solid rgb(255 255 255 / 18%); }
-.location-tooltip dt { color: #a9c1bb; font-size: 8px; text-transform: uppercase; }
-.location-tooltip dd { margin: 2px 0 0; font: 700 12px "SFMono-Regular", Consolas, monospace; }
+.location-tooltip .tooltip-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin: 6px 0 0; }
+.location-tooltip .tooltip-metrics > span { display: grid; gap: 2px; padding-top: 5px; border-top: 1px solid rgb(255 255 255 / 18%); }
+.location-tooltip .tooltip-metrics b { color: #a9c1bb; font-size: 8px; font-weight: 500; text-transform: uppercase; }
+.location-tooltip .tooltip-metrics em { color: white; font: 700 12px "SFMono-Regular", Consolas, monospace; font-style: normal; }
 .drawer-balance-summary { display: grid; grid-template-columns: repeat(3, 1fr); margin-bottom: 10px; border-block: 1px solid var(--line); }
 .drawer-balance-summary > div { padding: 10px; border-right: 1px solid var(--line); }
 .drawer-balance-summary > div:last-child { border-right: 0; }

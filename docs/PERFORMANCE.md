@@ -75,3 +75,16 @@ Measured on the 2026-07-30 Vercel Preview deployment in `SYD1`.
 | Location detail server query | 13–15 ms, 654 bytes |
 
 The browser observations include navigation, rendering and network work. Server observations are application telemetry from Vercel runtime logs. The initial response is bounded to location summaries and does not include serial objects; location detail is fetched separately. All observed interactions met the Sprint 5 warm target of less than 500 ms.
+
+## Sprint 5.1 inventory reporting
+
+Measured on the 2026-07-30 Vercel Preview deployment in `SYD1`. Six browser observations were recorded for each interaction.
+
+| Operation | Browser observation | Warm server telemetry |
+| --- | ---: | ---: |
+| Product Inventory Report | 387-423 ms | 24-26 ms, 9,235 bytes / 26 rows |
+| Product drilldown | 297-313 ms | 8-10 ms, 1,616 bytes |
+| Warehouse Map | 395-404 ms | 23 ms, 41,144 bytes |
+| Filtered CSV export | download | 32-69 ms, 1,748 bytes |
+
+The first observed report requests were 107 ms and 198 ms at the server and are reported separately from warm telemetry. The report uses database-side grouping, bounded pagination, and a separate product-location drilldown request. All measured browser interactions met the 500 ms Preview target.

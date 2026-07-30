@@ -327,11 +327,11 @@ function LocationCell({
         <b className="mono">{location.code}</b>
         <span>{location.skuCount > 1 ? t("map.mixedSku", { count: location.skuCount }) : location.primarySku ?? t("map.empty")}</span>
         <span>{t(`map.state.${location.state}`)}</span>
-        <dl>
-          <div><dt>{t("common.physical")}</dt><dd>{location.physicalQty}</dd></div>
-          <div><dt>{t("common.frozen")}</dt><dd>{location.frozenQty}</dd></div>
-          <div><dt>{t("common.available")}</dt><dd>{location.availableQty}</dd></div>
-        </dl>
+        <span className="tooltip-metrics">
+          <span><b>{t("common.physical")}</b><em>{location.physicalQty}</em></span>
+          <span><b>{t("common.frozen")}</b><em>{location.frozenQty}</em></span>
+          <span><b>{t("common.available")}</b><em>{location.availableQty}</em></span>
+        </span>
       </span>
     </button>
   );

@@ -6,6 +6,7 @@ export interface InventoryReportAggregateInput {
   sku: string;
   model: string;
   itemType: ItemType;
+  serialTrackingRequired: boolean;
   condition: StockCondition;
   locationId: string;
   physicalQty: number;
@@ -20,6 +21,7 @@ export interface InventoryReportRow {
   sku: string;
   model: string;
   itemType: ItemType;
+  serialTrackingRequired: boolean;
   physicalQty: number;
   frozenQty: number;
   availableQty: number;
@@ -58,6 +60,7 @@ export function aggregateInventoryReport(
       sku: input.sku,
       model: input.model,
       itemType: input.itemType,
+      serialTrackingRequired: input.serialTrackingRequired,
       physicalQty: 0,
       frozenQty: 0,
       availableQty: 0,
@@ -93,7 +96,7 @@ export function aggregateInventoryReport(
       availableQty: value.physicalQty - value.frozenQty,
       locationCount: locations.size,
       knownSerialCount,
-      serialCoverageGap: Math.max(0, value.physicalQty - knownSerialCount),
+      serialCoverageGap: value.serialTrackingRequired ? Math.max(0, value.physicalQty - knownSerialCount) : 0,
     };
   });
 }

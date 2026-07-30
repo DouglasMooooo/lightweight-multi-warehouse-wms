@@ -89,6 +89,7 @@ export class InventoryReportService {
         sku: product.sku,
         model: product.model,
         itemType: row.itemType as ItemType,
+        serialTrackingRequired: product.serialTrackingRequired,
         condition: row.condition as StockCondition,
         locationId: row.locationId,
         physicalQty: number(row._sum.physicalQty),
@@ -159,7 +160,7 @@ export class InventoryReportService {
       return {
         ...row,
         knownSerialCount,
-        serialCoverageGap: Math.max(0, row.physicalQty - knownSerialCount),
+        serialCoverageGap: row.serialTrackingRequired ? Math.max(0, row.physicalQty - knownSerialCount) : 0,
       };
     });
     return {
@@ -222,6 +223,7 @@ export class InventoryReportService {
       sku: product.sku,
       model: product.model,
       itemType: row.itemType as ItemType,
+      serialTrackingRequired: product.serialTrackingRequired,
       condition: row.condition as StockCondition,
       locationId: row.locationId,
       physicalQty: number(row._sum.physicalQty),
@@ -231,7 +233,8 @@ export class InventoryReportService {
     }));
     const total = aggregateInventoryReport(aggregateInputs)[0] ?? {
       warehouseCode, productId: product.id, sku: product.sku, model: product.model,
-      itemType: product.itemType as ItemType, physicalQty: 0, frozenQty: 0, availableQty: 0,
+      itemType: product.itemType as ItemType, serialTrackingRequired: product.serialTrackingRequired,
+      physicalQty: 0, frozenQty: 0, availableQty: 0,
       inTransitQty: 0, newQty: 0, repairGoodQty: 0, repairQty: 0, scrapQty: 0,
       materialQty: 0, locationCount: 0, knownSerialCount: 0, legacySerialGap: false,
       serialCoverageGap: 0,
@@ -269,7 +272,7 @@ export class InventoryReportService {
       totals: {
         ...total,
         knownSerialCount,
-        serialCoverageGap: Math.max(0, total.physicalQty - knownSerialCount),
+        serialCoverageGap: product.serialTrackingRequired ? Math.max(0, total.physicalQty - knownSerialCount) : 0,
       },
       locations: locationRows,
     };

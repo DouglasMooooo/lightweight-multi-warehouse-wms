@@ -23,6 +23,7 @@ interface ReportRow {
   sku: string;
   model: string;
   itemType: ItemType;
+  serialTrackingRequired: boolean;
   physicalQty: number;
   availableQty: number;
   frozenQty: number;
@@ -258,7 +259,9 @@ export function InventoryReportPage({ warehouse }: { warehouse: WarehouseCode })
               <td className="number">{row.knownSerialCount}</td>
               <td>{row.legacySerialGap
                 ? <StatusBadge code="Legacy_Gap" label={t("report.legacyGap")} tone="amber" />
-                : <span className="subtle">{t("report.currentCoverage", { count: row.serialCoverageGap })}</span>}
+                : <span className="subtle">{row.serialTrackingRequired
+                  ? t("report.currentCoverage", { count: row.serialCoverageGap })
+                  : t("report.notTracked")}</span>}
               </td>
             </tr>
           ))}</tbody>
@@ -302,7 +305,7 @@ export function InventoryReportPage({ warehouse }: { warehouse: WarehouseCode })
             <dl className="report-coverage">
               <div><dt>{t("report.knownSn")}</dt><dd>{detail.totals.knownSerialCount}</dd></div>
               <div><dt>{t("report.summary.physical")}</dt><dd>{detail.totals.physicalQty}</dd></div>
-              <div><dt>{t("report.uncovered")}</dt><dd>{detail.totals.serialCoverageGap}</dd></div>
+              <div><dt>{t("report.uncovered")}</dt><dd>{detail.product.serialTrackingRequired ? detail.totals.serialCoverageGap : t("report.notTracked")}</dd></div>
             </dl>
             {detail.totals.legacySerialGap && <div className="notice warning">{t("report.legacyGapHelp")}</div>}
             <h4>{t("report.locations")}</h4>
