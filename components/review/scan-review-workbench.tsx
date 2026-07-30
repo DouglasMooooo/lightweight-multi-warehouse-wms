@@ -291,7 +291,11 @@ export function ScanReviewWorkbench({
             })}</span>
           </div>
           {preview.errors.map((error, index) => (
-            <small className="error" key={`${error.code}:${index}`}>{error.message}</small>
+            <small className="error" key={`${error.code}:${index}`}>
+              {t(`review.fileError.${error.code}`, {
+                rows: error.rowNumbers?.join(", ") ?? "—",
+              })}
+            </small>
           ))}
           <Button
             type="button"
