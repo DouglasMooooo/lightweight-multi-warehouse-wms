@@ -62,3 +62,16 @@ Query review confirmed existing coverage for the measured access patterns: uniqu
 ## Hosting recommendation
 
 Keep Vercel + Neon. With both in Sydney and bounded queries, all measured warm medians are comfortably below the Sprint 4 targets. There is no performance evidence supporting a hosting migration at this time.
+
+## Sprint 5 Warehouse Map
+
+Measured on the 2026-07-30 Vercel Preview deployment in `SYD1`.
+
+| Operation | Observed result |
+| --- | ---: |
+| Full Warehouse Map page, six loads | 438–483 ms |
+| Location drawer, six opens | 293–316 ms |
+| Initial map server query | 18 ms, 41,144 bytes |
+| Location detail server query | 13–15 ms, 654 bytes |
+
+The browser observations include navigation, rendering and network work. Server observations are application telemetry from Vercel runtime logs. The initial response is bounded to location summaries and does not include serial objects; location detail is fetched separately. All observed interactions met the Sprint 5 warm target of less than 500 ms.

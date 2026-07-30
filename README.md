@@ -1,6 +1,6 @@
 # Lightweight Multi-Warehouse WMS Preview
 
-The Sprint 4 Preview is a PostgreSQL-backed Next.js WMS for SYD, MEL and BNE. PostgreSQL is authoritative; the Sydney workbook is read-only operational evidence. It adds guarded semantic workbook import, operational reconciliation, business-mode bulk SN workflows, bounded page APIs and Sydney-aligned Preview compute without changing the source file.
+The Sprint 5 Preview is a PostgreSQL-backed Next.js WMS for SYD, MEL and BNE. PostgreSQL is authoritative; the Sydney workbook is read-only operational evidence. It adds an industrial warehouse-operations UI, bounded global search, environment-safe ERP order preview/confirmation, and a data-driven visual warehouse map while preserving the validated inventory rules.
 
 The outbound lifecycle is deliberately staged:
 
@@ -73,6 +73,6 @@ pnpm lint
 pnpm build
 ```
 
-`ERP_ADAPTER=mock` keeps ERP calls server-side with deterministic Preview fixtures. Workbook parsing is server-side, accepts `.xlsx` up to 20 MB, uses cached formula values only, and never executes macros or writes the source. Reconciliation never posts adjustments.
+`ERP_ADAPTER=mock` keeps ERP calls server-side with deterministic local/demo fixtures. Preview/staging without an explicitly configured adapter reports that ERP is not configured, and Production rejects Mock. Workbook parsing is server-side, accepts `.xlsx` up to 20 MB, uses cached formula values only, and never executes macros or writes the source. Reconciliation never posts adjustments.
 
-See [Sprint 4 Report](docs/SPRINT4_OPERATIONAL_HARDENING.md), [Performance](docs/PERFORMANCE.md), [i18n](docs/I18N.md), [UX Guidelines](docs/UX_GUIDELINES.md), [Deployment Environments](docs/DEPLOYMENT_ENVIRONMENTS.md), [Shadow Import](docs/SHADOW_IMPORT.md), [Architecture](docs/ARCHITECTURE.md), [Data Model](docs/DATA_MODEL.md), [Business Rules](docs/BUSINESS_RULES.md), [Workflows](docs/WORKFLOWS.md), [Reconciliation](docs/RECONCILIATION.md), [Cutover Plan](docs/CUTOVER_PLAN.md), and [Assumptions](docs/ASSUMPTIONS.md).
+See [Sprint 5 Report](docs/SPRINT5_WAREHOUSE_UX_ERP_MAP.md), [Sprint 4 Report](docs/SPRINT4_OPERATIONAL_HARDENING.md), [Performance](docs/PERFORMANCE.md), [i18n](docs/I18N.md), [UX Guidelines](docs/UX_GUIDELINES.md), [Deployment Environments](docs/DEPLOYMENT_ENVIRONMENTS.md), [Shadow Import](docs/SHADOW_IMPORT.md), [Architecture](docs/ARCHITECTURE.md), [Data Model](docs/DATA_MODEL.md), [Business Rules](docs/BUSINESS_RULES.md), [Workflows](docs/WORKFLOWS.md), [Reconciliation](docs/RECONCILIATION.md), [Cutover Plan](docs/CUTOVER_PLAN.md), and [Assumptions](docs/ASSUMPTIONS.md).

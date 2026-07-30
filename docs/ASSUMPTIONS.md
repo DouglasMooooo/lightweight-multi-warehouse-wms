@@ -57,3 +57,13 @@ Until explicit cutover approval, the workbook remains the production operational
 - Bulk New Inbound creates one high-level inventory transaction and audit operation with all supplied serial identities. Bind Existing Stock creates identities only and cannot increase Physical Qty.
 - The IAD1/SYD1 A/B test used isolated Vercel Preview deployments and read-only requests. Production was not changed. The dedicated Preview database remained the data source, and no shadow migration was rerun.
 - Preview functions are now explicitly configured for `syd1`, matching the Sydney Neon Preview database. This is a Preview evidence-based change, not authorization to change Production.
+
+## Sprint 5 ERP and warehouse-map decisions
+
+- No approved Kingdee request/response contract or credentials were present in the repository. `KingdeeERPAdapter` therefore targets an explicit normalized gateway boundary and does not invent vendor fields.
+- The current Vercel Preview is intentionally configured with `ERP_ADAPTER=mock` and labels the adapter as Mock. Real ERP connectivity, latency and write-back are not claimed as verified.
+- Preview/staging without a configured adapter reports `ERP connection not configured`; Production cannot select or silently fall back to Mock.
+- Structured `Location.rack`, `row`, `bay`, `side` and `serviceZone` fields are authoritative for visualization. The location code is display identity, not the layout parser.
+- Locations without rack coordinates render outside the rack grid; known service zones render as separate operational blocks.
+- The data model has no physical capacity field. Warehouse Map reports inventory state and quantities only, never a utilization percentage.
+- Initial map responses intentionally omit serial objects. SN location resolution is a bounded server-side search performed only when an operator supplies a query.
