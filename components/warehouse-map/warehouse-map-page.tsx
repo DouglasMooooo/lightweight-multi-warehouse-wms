@@ -120,6 +120,7 @@ export function WarehouseMapPage({ warehouse }: { warehouse: WarehouseCode }) {
   const { locale, t } = useI18n();
   const [query, setQuery] = useState("");
   const [view, setView] = useState<MapView>("Stock");
+  const [level, setLevel] = useState<"floor" | "rack">("floor");
   const [floor, setFloor] = useState<FloorData>();
   const [selectedArea, setSelectedArea] = useState("");
   const [rack, setRack] = useState<RackData>();
@@ -141,7 +142,7 @@ export function WarehouseMapPage({ warehouse }: { warehouse: WarehouseCode }) {
           if (body.focusArea) {
             setSelectedArea(body.focusArea);
             if (body.focusLocationCode) setSelectedCode(body.focusLocationCode);
-          }
+          } else setSelectedArea((current) => current || body.areas.find((area) => area.kind === "rack")?.id || body.areas[0]?.id || "");
         })
         .catch((reason) => { if (reason?.name !== "AbortError") setError(reason instanceof Error ? reason.message : t("common.loadFailed")); });
     }, 180);
@@ -185,6 +186,11 @@ export function WarehouseMapPage({ warehouse }: { warehouse: WarehouseCode }) {
     () => selectedLayout?.kind === "service" ? rack?.locations ?? [] : [],
     [rack?.locations, selectedLayout?.kind],
   );
+  const floorTotals = useMemo(() => floor?.areas.reduce((totals, area) => ({
+    physical: totals.physical + area.physicalQty,
+    frozen: totals.frozen + area.frozenQty,
+    locations: totals.locations + area.locationCount,
+  }), { physical: 0, frozen: 0, locations: 0 }), [floor?.areas]);
 
   return (
     <>
@@ -206,30 +212,50 @@ export function WarehouseMapPage({ warehouse }: { warehouse: WarehouseCode }) {
           ))}
         </div>}
       />
-      <div className="warehouse-map-toolbar">
-        <div className="search-wrap map-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("map.searchPlaceholder")} /></div>
-        {floor && <div className="map-summary-strip">
-          <span><b>{floor.summary.occupied}</b>{t("map.occupied")}</span>
-          <span><b>{floor.summary.empty}</b>{t("map.empty")}</span>
-          <span><b>{floor.summary.prepared}</b>{t("map.frozenView")}</span>
-        </div>}
+      <div className="map-command-band">
+        <div className="warehouse-map-toolbar">
+          <div className="search-wrap map-search"><Search /><input id="warehouse-map-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("map.searchPlaceholder")} /></div>
+          {floor && floorTotals && <div className="map-summary-strip">
+            <span><b>{floorTotals.physical}</b>{t("common.physical")}</span>
+            <span><b>{floorTotals.physical - floorTotals.frozen}</b>{t("common.available")}</span>
+            <span><b>{floorTotals.frozen}</b>{t("common.frozen")}</span>
+            <span><b>{floorTotals.locations}</b>{t("map.locations")}</span>
+          </div>}
+        </div>
+        <MapLegend view={view} t={t} />
+      </div>
+      <div className="map-level-path" aria-label={t("map.levelPath")}>
+        <button className={level === "floor" ? "active" : ""} type="button" onClick={() => setLevel("floor")}>{t("map.levelFloor")}</button>
+        <span>→</span>
+        <button className={level === "rack" ? "active" : ""} type="button" disabled={!selectedArea} onClick={() => setLevel("rack")}>{t("map.levelRack")}</button>
+        <span>→</span>
+        <button type="button" disabled={!selectedCode}>{t("map.levelLocation")}</button>
       </div>
       {error && <div className="notice error">{error}</div>}
       {!floor && !error && <div className="map-skeleton" aria-label={t("common.loading")} />}
       {floor && (
         <section className="warehouse-visual-shell">
-          {!selectedArea ? (
-            <WarehouseFloorPlan
-              areas={floor.areas}
-              hasQuery={Boolean(query)}
-              view={view}
-              onSelect={(area) => setSelectedArea(area)}
-              t={t}
-            />
+          {level === "floor" ? (
+            <div className="map-floor-stage">
+              <WarehouseFloorPlan
+                areas={floor.areas}
+                hasQuery={Boolean(query)}
+                selectedArea={selectedArea}
+                view={view}
+                onSelect={(area) => setSelectedArea(area)}
+                t={t}
+              />
+              <AreaInspector
+                area={selectedLayout}
+                onOpen={() => setLevel("rack")}
+                onSearch={() => document.getElementById("warehouse-map-search")?.focus()}
+                t={t}
+              />
+            </div>
           ) : (
             <div className="warehouse-level-two">
               <div className="map-level-head">
-                <Button type="button" onClick={() => { setSelectedArea(""); setRack(undefined); }}>
+                <Button type="button" onClick={() => setLevel("floor")}>
                   <ArrowLeft /> {t("map.backToFloor")}
                 </Button>
                 <div><span>{selectedLayout?.kind === "rack" ? t("map.rackView") : t("map.floorPlan")}</span><h2>{selectedArea}</h2></div>
@@ -249,7 +275,6 @@ export function WarehouseMapPage({ warehouse }: { warehouse: WarehouseCode }) {
           )}
         </section>
       )}
-      <MapLegend view={view} t={t} />
       {selectedCode && (
         <LocationDrawer
           detail={detail}
@@ -266,12 +291,14 @@ export function WarehouseMapPage({ warehouse }: { warehouse: WarehouseCode }) {
 function WarehouseFloorPlan({
   areas,
   hasQuery,
+  selectedArea,
   view,
   onSelect,
   t,
 }: {
   areas: FloorArea[];
   hasQuery: boolean;
+  selectedArea: string;
   view: MapView;
   onSelect: (area: string) => void;
   t: (key: string, values?: Record<string, string | number>) => string;
@@ -280,8 +307,8 @@ function WarehouseFloorPlan({
     <div className={`warehouse-floor-plan view-${view.toLowerCase()}`}>
       <svg viewBox="0 0 824 460" role="img" aria-label={t("map.floorPlan")} preserveAspectRatio="xMidYMid meet">
         <rect className="floor-boundary" x="12" y="12" width="800" height="436" rx="2" />
-        <path className="floor-aisle" d="M214 24V436 M510 24V436 M24 246H800" />
-        <path className="floor-flow" d="M112 244H700 M503 244l-16-10v20z" />
+        <path className="floor-aisle" d="M580 24V436 M24 222H800" />
+        <path className="floor-flow" d="M72 222H742 M505 222l-16-10v20z" />
         {areas.map((area) => {
           const conditionEntries = Object.entries(area.conditionCounts).filter(([, quantity]) => quantity > 0);
           const dominant = conditionEntries.length > 1
@@ -292,7 +319,7 @@ function WarehouseFloorPlan({
             : view === "Condition" && dominant ? `condition-${dominant}` : area.physicalQty > 0 ? "occupied" : "empty";
           return (
             <g
-              className={`floor-area ${state} ${area.kind} ${area.matching ? "matched" : ""} ${hasQuery && !area.matching ? "dimmed" : ""}`}
+              className={`floor-area ${state} ${area.kind} ${area.id === selectedArea ? "selected" : ""} ${area.matching ? "matched" : ""} ${hasQuery && !area.matching ? "dimmed" : ""}`}
               role="button"
               tabIndex={0}
               aria-label={`${area.id}, ${area.physicalQty}`}
@@ -301,8 +328,8 @@ function WarehouseFloorPlan({
               key={area.id}
             >
               <rect x={area.x} y={area.y} width={area.width} height={area.height} rx="3" />
-              {area.kind === "rack" && Array.from({ length: 5 }, (_, index) => (
-                <line x1={area.x + 18 + index * ((area.width - 36) / 4)} y1={area.y + 40} x2={area.x + 18 + index * ((area.width - 36) / 4)} y2={area.y + area.height - 16} key={index} />
+              {area.kind === "rack" && Array.from({ length: 12 }, (_, index) => (
+                <line x1={area.x + 28 + index * ((area.width - 56) / 11)} y1={area.y + 42} x2={area.x + 28 + index * ((area.width - 56) / 11)} y2={area.y + area.height - 18} key={index} />
               ))}
               <text className="area-name" x={area.x + 16} y={area.y + 26}>{area.id}</text>
               <text className="area-stat" x={area.x + 16} y={area.y + area.height - 30}>{t("map.occupiedLocations", { count: area.occupiedLocations })}</text>
@@ -314,6 +341,56 @@ function WarehouseFloorPlan({
         <text className="floor-caption" x="26" y="440">SYD · OPERATIONAL FLOOR · NOT TO SCALE</text>
       </svg>
     </div>
+  );
+}
+
+function AreaInspector({
+  area,
+  onOpen,
+  onSearch,
+  t,
+}: {
+  area?: FloorArea;
+  onOpen: () => void;
+  onSearch: () => void;
+  t: (key: string, values?: Record<string, string | number>) => string;
+}) {
+  const conditions = area
+    ? Object.entries(area.conditionCounts).filter(([, quantity]) => quantity > 0)
+    : [];
+  return (
+    <aside className="map-area-inspector" aria-label={t("map.selectedArea")}>
+      <div className="map-inspector-head">
+        <span>{t("map.selectedArea")}</span>
+        <h3>{area?.id ?? "—"}</h3>
+      </div>
+      <dl className="map-inspector-meta">
+        <div><dt>{t("map.areaType")}</dt><dd>{area ? t(area.kind === "rack" ? "map.rackView" : "map.serviceArea") : "—"}</dd></div>
+        <div><dt>{t("common.status")}</dt><dd><i />{t("map.statusActive")}</dd></div>
+        <div><dt>{t("map.locations")}</dt><dd>{area?.locationCount ?? "—"}</dd></div>
+        <div><dt>{t("map.occupied")}</dt><dd>{area?.occupiedLocations ?? "—"}</dd></div>
+      </dl>
+      <div className="map-inspector-actions">
+        <Button className="primary" type="button" disabled={!area} onClick={onOpen}>{t("map.goToRack")}</Button>
+        <Button type="button" onClick={onSearch}><Search />{t("map.searchArea")}</Button>
+      </div>
+      <div className="map-inspector-section">
+        <h4>{t("map.areaSummary")}</h4>
+        <div className="map-inspector-balances">
+          <span><small>{t("common.physical")}</small><strong>{area?.physicalQty ?? "—"}</strong></span>
+          <span><small>{t("common.available")}</small><strong>{area ? area.physicalQty - area.frozenQty : "—"}</strong></span>
+          <span><small>{t("common.frozen")}</small><strong>{area?.frozenQty ?? "—"}</strong></span>
+        </div>
+      </div>
+      <div className="map-inspector-section">
+        <h4>{t("map.conditionMix")}</h4>
+        <div className="map-condition-mix">
+          {conditions.length
+            ? conditions.map(([condition, quantity]) => <div key={condition}><StatusBadge code={condition} /><strong>{quantity}</strong></div>)
+            : <span className="subtle">{t("map.empty")}</span>}
+        </div>
+      </div>
+    </aside>
   );
 }
 
@@ -420,11 +497,13 @@ function ServiceAreaView({
 }
 
 function MapLegend({ view, t }: { view: MapView; t: (key: string) => string }) {
-  const items = view === "Condition"
-    ? [["condition-new", "map.legend.new"], ["condition-repair-good", "map.legend.repairGood"], ["condition-repair", "map.legend.repair"], ["condition-material", "map.legend.material"], ["condition-mixed", "map.legend.mixed"]]
-    : view === "Frozen"
-      ? [["awaiting-pickup", "map.legend.awaitingPickup"], ["muted-stock", "map.legend.empty"]]
-      : [["occupied", "map.legend.new"], ["empty", "map.legend.empty"], ["exception", "status.Exception"]];
+  const items = [
+    ["condition-new", "map.legend.new"],
+    ["condition-repair-good", "map.legend.repairGood"],
+    ["condition-repair", "map.legend.repair"],
+    ["condition-material", "map.legend.material"],
+    [view === "Frozen" ? "awaiting-pickup" : "condition-mixed", view === "Frozen" ? "map.legend.awaitingPickup" : "map.legend.mixed"],
+  ];
   return <div className="map-legend">{items.map(([className, key]) => <span key={key}><i className={className} />{t(key)}</span>)}</div>;
 }
 

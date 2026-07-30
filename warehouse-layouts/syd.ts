@@ -11,12 +11,12 @@ export interface WarehouseFloorAreaLayout {
 }
 
 export const sydWarehouseLayout: WarehouseFloorAreaLayout[] = [
-  { id: "REPAIR", x: 36, y: 42, width: 160, height: 180, orientation: "vertical", kind: "service" },
-  { id: "R1", x: 242, y: 42, width: 250, height: 180, orientation: "vertical", kind: "rack" },
-  { id: "R2", x: 538, y: 42, width: 250, height: 180, orientation: "vertical", kind: "rack" },
-  { id: "RETURN", x: 36, y: 270, width: 160, height: 148, orientation: "horizontal", kind: "service" },
-  { id: "FLEX", x: 242, y: 270, width: 250, height: 148, orientation: "horizontal", kind: "service" },
-  { id: "DISPATCH", x: 538, y: 270, width: 250, height: 148, orientation: "horizontal", kind: "service" }
+  { id: "REPAIR", x: 594, y: 214, width: 182, height: 80, orientation: "horizontal", kind: "service" },
+  { id: "R1", x: 48, y: 34, width: 520, height: 172, orientation: "vertical", kind: "rack" },
+  { id: "R2", x: 48, y: 240, width: 520, height: 172, orientation: "vertical", kind: "rack" },
+  { id: "RETURN", x: 594, y: 304, width: 182, height: 108, orientation: "horizontal", kind: "service" },
+  { id: "FLEX", x: 594, y: 124, width: 182, height: 80, orientation: "horizontal", kind: "service" },
+  { id: "DISPATCH", x: 594, y: 34, width: 182, height: 80, orientation: "horizontal", kind: "service" }
 ];
 
 export function sydneyAreaForLocation(location: {

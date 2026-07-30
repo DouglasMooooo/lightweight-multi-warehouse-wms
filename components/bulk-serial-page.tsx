@@ -1,5 +1,14 @@
 "use client";
 
+import {
+  ArrowRight,
+  Link2,
+  PackageCheck,
+  PackagePlus,
+  RotateCcw,
+  ScanLine,
+  Wrench,
+} from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { WarehouseCode } from "@/domain/types";
 import { Badge, StatusBadge } from "@/components/shared/status-badge";
@@ -37,6 +46,14 @@ const modeKeys: Record<Exclude<Mode, "launcher">, string> = {
   LEGACY_REPAIR_GOOD: "bulk.mode.repairGood",
   OUTBOUND: "bulk.mode.outbound",
   BIND_EXISTING: "bulk.mode.bindExisting",
+};
+
+const modeIcons: Record<Exclude<Mode, "launcher">, typeof ScanLine> = {
+  NEW_INBOUND: PackagePlus,
+  FAULTY_RECEIVING: Wrench,
+  LEGACY_REPAIR_GOOD: RotateCcw,
+  OUTBOUND: PackageCheck,
+  BIND_EXISTING: Link2,
 };
 
 export function BulkSerialPage({ warehouseCode }: { warehouseCode: WarehouseCode }) {
@@ -254,13 +271,34 @@ export function BulkSerialPage({ warehouseCode }: { warehouseCode: WarehouseCode
     return (
       <>
         <PageHeader title={t("bulk.title")} subtitle={t("bulk.subtitle")} />
-        <div className="grid metrics">
-          {(Object.keys(modeKeys) as Array<Exclude<Mode, "launcher">>).map((value) => (
-            <button className="metric bulk-operation-card" type="button" key={value} disabled={!context} onClick={() => selectMode(value)}>
-              <div className="metric-label">{t(modeKeys[value])}</div>
-              <div className="metric-meta">{t(`bulk.modeHelp.${value}`)}</div>
-            </button>
-          ))}
+        <div className="bulk-launcher-console">
+          <div className="bulk-launcher-head">
+            <ScanLine />
+            <div>
+              <span>{t("bulk.launcherEyebrow")}</span>
+              <h3>{t("bulk.launcherTitle")}</h3>
+              <p>{t("bulk.launcherHelp")}</p>
+            </div>
+            <dl>
+              <div><dt>{t("common.warehouse")}</dt><dd>{warehouseCode}</dd></div>
+              <div><dt>{t("bulk.availableProducts")}</dt><dd>{context?.products.length ?? "—"}</dd></div>
+              <div><dt>{t("bulk.availableLocations")}</dt><dd>{context?.locations.length ?? "—"}</dd></div>
+            </dl>
+          </div>
+          <div className="bulk-operation-list">
+            {(Object.keys(modeKeys) as Array<Exclude<Mode, "launcher">>).map((value, index) => {
+              const Icon = modeIcons[value];
+              return (
+                <button type="button" key={value} disabled={!context} onClick={() => selectMode(value)}>
+                  <b>{String(index + 1).padStart(2, "0")}</b>
+                  <Icon />
+                  <span><strong>{t(modeKeys[value])}</strong><small>{t(`bulk.modeHelp.${value}`)}</small></span>
+                  <em>{t("bulk.openOperation")}</em>
+                  <ArrowRight />
+                </button>
+              );
+            })}
+          </div>
         </div>
         {message && <div className={`notice ${message.error ? "error" : ""}`}>{message.text}</div>}
       </>
