@@ -10,7 +10,9 @@ import { Button, cn, EmptyState, PageHeader } from "@/components/shared/ui";
 
 export function InventoryPage({ warehouse }: { warehouse: WarehouseCode }) {
   const { t } = useI18n();
-  const [query, setQuery] = useState("");
+  const initialParams = () => typeof window === "undefined" ? new URLSearchParams() : new URLSearchParams(window.location.search);
+  const [query, setQuery] = useState(() => initialParams().get("location") || initialParams().get("sku") || "");
+  const [locationFilter, setLocationFilter] = useState(() => initialParams().get("location") || "");
   const [condition, setCondition] = useState("All");
   const [showRepair, setShowRepair] = useState(false);
   const [showMaterial, setShowMaterial] = useState(false);
@@ -25,7 +27,7 @@ export function InventoryPage({ warehouse }: { warehouse: WarehouseCode }) {
         page: String(page), pageSize: "50", warehouse,
         positiveOnly: String(!showZero),
       });
-      if (query) params.set("sku", query);
+      if (query) params.set(locationFilter ? "location" : "sku", query);
       if (condition !== "All") params.set("condition", condition);
       if (!showMaterial) params.set("itemType", "Product");
       if (!showRepair && condition === "All") params.set("excludeRepair", "true");
@@ -38,7 +40,7 @@ export function InventoryPage({ warehouse }: { warehouse: WarehouseCode }) {
         .catch((reason) => { if (reason?.name !== "AbortError") setError(reason instanceof Error ? reason.message : t("common.loadFailed")); });
     }, 180);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [condition, page, query, showMaterial, showRepair, showZero, t, warehouse]);
+  }, [condition, locationFilter, page, query, showMaterial, showRepair, showZero, t, warehouse]);
   const rows = data?.rows ?? [];
   return (
     <>
@@ -50,7 +52,7 @@ export function InventoryPage({ warehouse }: { warehouse: WarehouseCode }) {
       <div className="notice">{t("inventory.formula")}</div>
       <div className="panel">
         <div className="toolbar">
-          <div className="search-wrap"><Search /><input placeholder={t("inventory.search")} value={query} onChange={(event) => setQuery(event.target.value)} /></div>
+          <div className="search-wrap"><Search /><input placeholder={t("inventory.search")} value={query} onChange={(event) => { setQuery(event.target.value); setLocationFilter(""); }} /></div>
           <select aria-label={t("common.condition")} value={condition} onChange={(event) => setCondition(event.target.value)}>
             <option value="All">{t("common.all")}</option>
             <option value="New">{t("status.New")}</option>

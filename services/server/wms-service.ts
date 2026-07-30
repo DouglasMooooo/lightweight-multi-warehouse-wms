@@ -33,8 +33,8 @@ import type {
   WmsCommand,
   WmsState,
 } from "@/domain/types";
-import type { ERPAdapter, ERPSerialLookup } from "@/integrations/erp-adapter";
-import { MockERPAdapter } from "@/integrations/mock-erp-adapter";
+import type { ERPAdapter, ERPOutboundOrder, ERPSerialLookup } from "@/integrations/erp-adapter";
+import { createERPAdapter } from "@/integrations/erp-adapter-factory";
 import { getPrisma } from "@/lib/prisma";
 import { InventoryRepository, type BalanceKey } from "@/repositories/inventory-repository";
 import { seedDemo } from "@/prisma/demo-seed";
@@ -42,6 +42,38 @@ import { assertDemoResetAllowed } from "@/lib/environment";
 
 type Tx = Prisma.TransactionClient;
 type Actor = { id: string; displayName: string; role: string };
+type OutboundImportIssue = {
+  code: string;
+  message: string;
+  lineIndex?: number;
+  value?: string;
+};
+
+export interface OutboundImportPreview {
+  status: "Ready" | "Needs_Attention" | "Already_Imported";
+  adapter: string;
+  order: {
+    shNo: string;
+    customerLabel?: string;
+    physicalWarehouseCode: string;
+    pickupCode?: string;
+    lines: Array<{
+      sku: string;
+      model: string;
+      quantity: number;
+      erpWarehouse: string;
+      wmsCondition?: StockCondition;
+      productExists: boolean;
+      mappingExists: boolean;
+    }>;
+  };
+  issues: OutboundImportIssue[];
+  existingOrder?: {
+    id: string;
+    status: string;
+    pickupCode?: string;
+  };
+}
 
 const decimal = (value: string | number | Prisma.Decimal) => new Prisma.Decimal(value);
 const number = (value: string | number | Prisma.Decimal) => Number(value);
@@ -150,7 +182,7 @@ function balanceKey(input: {
 export class WmsApplicationService {
   constructor(
     private readonly prisma = getPrisma(),
-    private readonly erp: ERPAdapter = new MockERPAdapter(),
+    private readonly erp: ERPAdapter = createERPAdapter(),
   ) {}
 
   async snapshot(): Promise<WmsState> {
@@ -614,37 +646,200 @@ export class WmsApplicationService {
     throw new DomainError("ERP record not found. A Manual Review exception was created.");
   }
 
-  private async importOutbound(shNo: string) {
-    const erpOrder = await this.erp.getOutboundOrder(shNo.trim().toUpperCase());
-    if (!erpOrder)
+  private async loadOutboundImport(shNo: string): Promise<{
+    preview: OutboundImportPreview;
+    erpOrder: ERPOutboundOrder | null;
+  }> {
+    const normalized = shNo.trim().toUpperCase();
+    if (!normalized)
+      throw new DomainError("Enter an SH number.", "ERP_SH_REQUIRED");
+    const health = await this.erp.healthCheck();
+    const erpOrder = await this.erp.getOutboundOrder(normalized);
+    if (!erpOrder) {
+      return {
+        erpOrder: null,
+        preview: {
+          status: "Needs_Attention",
+          adapter: health.adapter,
+          order: {
+            shNo: normalized,
+            physicalWarehouseCode: "",
+            lines: [],
+          },
+          issues: [{
+            code: "ERP_ORDER_NOT_FOUND",
+            message: `ERP order ${normalized} was not found.`,
+            value: normalized,
+          }],
+        },
+      };
+    }
+
+    const duplicate = await this.prisma.outboundOrder.findUnique({
+      where: { shNo: erpOrder.shNo },
+      select: { id: true, status: true, pickupCode: true },
+    });
+    const warehouse = await this.prisma.warehouse.findUnique({
+      where: { code: erpOrder.physicalWarehouseCode },
+    });
+    const skus = [...new Set(erpOrder.replacementUnitInformation.map((line) => line.sku))];
+    const products = await this.prisma.product.findMany({
+      where: { sku: { in: skus }, active: true },
+    });
+    const productBySku = new Map(products.map((product) => [product.sku, product]));
+    const mappings = warehouse
+      ? await this.prisma.eRPWarehouseMapping.findMany({
+          where: {
+            warehouseId: warehouse.id,
+            erpWarehouse: {
+              in: [...new Set(erpOrder.replacementUnitInformation.map((line) => line.erpWarehouse))],
+            },
+            active: true,
+          },
+        })
+      : [];
+    const mappingByWarehouse = new Map(mappings.map((mapping) => [mapping.erpWarehouse, mapping]));
+    const issues: OutboundImportIssue[] = [];
+    if (!erpOrder.replacementUnitInformation.length) {
+      issues.push({
+        code: "ERP_REPLACEMENT_LINES_MISSING",
+        message: "Replacement Unit Information has no replacement lines.",
+      });
+    }
+    if (!warehouse) {
+      issues.push({
+        code: "ERP_PHYSICAL_WAREHOUSE_UNMAPPED",
+        message: `Physical warehouse "${erpOrder.physicalWarehouseCode}" is not configured in WMS.`,
+        value: erpOrder.physicalWarehouseCode,
+      });
+    }
+    const lines = erpOrder.replacementUnitInformation.map((line, lineIndex) => {
+      const product = productBySku.get(line.sku);
+      const mapping = mappingByWarehouse.get(line.erpWarehouse);
+      if (!product)
+        issues.push({
+          code: "ERP_PRODUCT_NOT_FOUND",
+          message: `SKU ${line.sku} does not exist in WMS Product Master.`,
+          lineIndex,
+          value: line.sku,
+        });
+      if (!mapping)
+        issues.push({
+          code: "ERP_WAREHOUSE_MAPPING_MISSING",
+          message: `ERP warehouse "${line.erpWarehouse}" is not mapped.`,
+          lineIndex,
+          value: line.erpWarehouse,
+        });
+      if (!Number.isFinite(line.quantity) || line.quantity <= 0)
+        issues.push({
+          code: "ERP_INVALID_QUANTITY",
+          message: `Replacement line ${lineIndex + 1} must have a quantity greater than zero.`,
+          lineIndex,
+          value: String(line.quantity),
+        });
+      return {
+        sku: line.sku,
+        model: product?.model ?? line.model,
+        quantity: line.quantity,
+        erpWarehouse: line.erpWarehouse,
+        wmsCondition: mapping?.condition as StockCondition | undefined,
+        productExists: Boolean(product),
+        mappingExists: Boolean(mapping),
+      };
+    });
+    return {
+      erpOrder,
+      preview: {
+        status: duplicate ? "Already_Imported" : issues.length ? "Needs_Attention" : "Ready",
+        adapter: health.adapter,
+        order: {
+          shNo: erpOrder.shNo,
+          customerLabel: erpOrder.customerLabel,
+          physicalWarehouseCode: erpOrder.physicalWarehouseCode,
+          pickupCode: erpOrder.pickupCode,
+          lines,
+        },
+        issues,
+        existingOrder: duplicate
+          ? {
+              id: duplicate.id,
+              status: duplicate.status,
+              pickupCode: duplicate.pickupCode ?? undefined,
+            }
+          : undefined,
+      },
+    };
+  }
+
+  async previewOutboundImport(shNo: string) {
+    return (await this.loadOutboundImport(shNo)).preview;
+  }
+
+  async erpHealth() {
+    const [health, lastImport, failedSyncJobs, mappings] = await Promise.all([
+      this.erp.healthCheck(),
+      this.prisma.eRPDocument.findFirst({
+        where: { documentType: "OutboundOrder" },
+        orderBy: { createdAt: "desc" },
+        select: { externalNumber: true, createdAt: true },
+      }),
+      this.prisma.eRPSyncJob.count({ where: { status: { in: ["Failed", "Manual_Review"] } } }),
+      this.prisma.eRPWarehouseMapping.findMany({
+        where: { active: true },
+        include: { warehouse: true },
+        orderBy: [{ warehouse: { code: "asc" } }, { erpWarehouse: "asc" }],
+      }),
+    ]);
+    return {
+      ...health,
+      configured: health.adapter !== "Not configured",
+      lastSuccessfulImport: lastImport
+        ? { reference: lastImport.externalNumber, at: lastImport.createdAt.toISOString() }
+        : null,
+      failedSyncJobs,
+      mappings: mappings.map((mapping) => ({
+        id: mapping.id,
+        physicalWarehouse: mapping.warehouse.code,
+        erpWarehouse: mapping.erpWarehouse,
+        condition: mapping.condition,
+      })),
+    };
+  }
+
+  async confirmOutboundImport(shNo: string) {
+    const { preview, erpOrder } = await this.loadOutboundImport(shNo);
+    if (preview.status === "Already_Imported")
+      return { imported: false, preview, existingOrder: preview.existingOrder };
+    if (preview.status !== "Ready" || !erpOrder)
       throw new DomainError(
-        "Replacement Unit Information was not found.",
-        "ERP_LOOKUP_FAILED",
+        preview.issues[0]?.message ?? "ERP order is not ready to import.",
+        preview.issues[0]?.code ?? "ERP_IMPORT_VALIDATION_FAILED",
       );
+    await this.createOutboundFromERP(erpOrder, preview);
+    const created = await this.prisma.outboundOrder.findUniqueOrThrow({
+      where: { shNo: erpOrder.shNo },
+      select: { id: true, shNo: true, status: true, pickupCode: true },
+    });
+    return { imported: true, order: created };
+  }
+
+  private async importOutbound(shNo: string) {
+    const result = await this.confirmOutboundImport(shNo);
+    if (!result.imported)
+      throw new DomainError("This ERP order is already in WMS.", "ERP_ORDER_ALREADY_IMPORTED");
+  }
+
+  private async createOutboundFromERP(erpOrder: ERPOutboundOrder, preview: OutboundImportPreview) {
     await serializable(this.prisma, async (tx) => {
       const who = await actor(tx);
       const duplicate = await tx.outboundOrder.findUnique({ where: { shNo: erpOrder.shNo } });
-      if (duplicate) throw new DomainError("This SH number already exists.");
+      if (duplicate) throw new DomainError("This ERP order is already in WMS.", "ERP_ORDER_ALREADY_IMPORTED");
       const warehouse = await requireWarehouse(tx, erpOrder.physicalWarehouseCode);
-      const mappedLines = [];
-      for (const erpLine of erpOrder.replacementUnitInformation) {
-        const product = await requireProduct(tx, erpLine.sku);
-        const mapping = await tx.eRPWarehouseMapping.findUnique({
-          where: {
-            warehouseId_erpWarehouse: {
-              warehouseId: warehouse.id,
-              erpWarehouse: erpLine.erpWarehouse,
-            },
-          },
-        });
-        if (!mapping) throw new DomainError(`ERP warehouse mapping is missing for ${erpLine.erpWarehouse}.`);
-        mappedLines.push({ erpLine, product, condition: mapping.condition });
-      }
-      if (!mappedLines.length)
-        throw new DomainError(
-          "Replacement Unit Information has no lines.",
-          "ERP_LOOKUP_FAILED",
-        );
+      const mappedLines = await Promise.all(preview.order.lines.map(async (line) => ({
+        erpLine: line,
+        product: await requireProduct(tx, line.sku),
+        condition: line.wmsCondition!,
+      })));
       const order = await tx.outboundOrder.create({
         data: {
           shNo: erpOrder.shNo,

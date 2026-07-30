@@ -41,7 +41,11 @@ const modeKeys: Record<Exclude<Mode, "launcher">, string> = {
 
 export function BulkSerialPage({ warehouseCode }: { warehouseCode: WarehouseCode }) {
   const { t, error: friendlyError } = useI18n();
-  const [mode, setMode] = useState<Mode>("launcher");
+  const [mode, setMode] = useState<Mode>(() => {
+    if (typeof window === "undefined") return "launcher";
+    const requested = new URLSearchParams(window.location.search).get("mode") as Mode | null;
+    return requested && requested in modeKeys ? requested : "launcher";
+  });
   const [context, setContext] = useState<Context>();
   const [sku, setSku] = useState("");
   const [locationCode, setLocationCode] = useState("");
@@ -59,7 +63,6 @@ export function BulkSerialPage({ warehouseCode }: { warehouseCode: WarehouseCode
     () => serialText.split(/[\r\n,\t;]+/).map((row) => row.trim().toUpperCase()).filter(Boolean),
     [serialText],
   );
-
   useEffect(() => {
     const controller = new AbortController();
     fetch(`/api/bulk-serial/context?warehouse=${encodeURIComponent(warehouseCode)}`, {
@@ -71,14 +74,20 @@ export function BulkSerialPage({ warehouseCode }: { warehouseCode: WarehouseCode
         if (!response.ok) throw new Error(body.error || t("common.loadFailed"));
         setContext(body);
         setSku((value) => value || body.products[0]?.sku || "");
-        setLocationCode((value) => value || body.locations[0]?.code || "");
+        setLocationCode((value) => {
+          if (value) return value;
+          if (mode === "FAULTY_RECEIVING")
+            return body.locations.find((row: Context["locations"][number]) => row.code === "REPAIR-01")?.code ??
+              body.locations.find((row: Context["locations"][number]) => row.serviceZone)?.code ?? "";
+          return body.locations[0]?.code || "";
+        });
       })
       .catch((error) => {
         if (error instanceof DOMException && error.name === "AbortError") return;
         setMessage({ text: error instanceof Error ? error.message : t("common.loadFailed"), error: true });
       });
     return () => controller.abort();
-  }, [t, warehouseCode]);
+  }, [mode, t, warehouseCode]);
 
   function selectMode(next: Mode) {
     if (next === "FAULTY_RECEIVING") {

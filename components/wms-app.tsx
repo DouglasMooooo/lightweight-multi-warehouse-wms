@@ -28,10 +28,13 @@ import type {
 import type { ERPSerialLookup } from "@/integrations/erp-adapter";
 import { ReconciliationView } from "@/components/reconciliation-view";
 import { BulkSerialPage } from "@/components/bulk-serial-page";
+import { ERPHealthPanel } from "@/components/admin/erp-health-panel";
 import { DashboardPage } from "@/components/dashboard/dashboard-page";
 import { InventoryPage } from "@/components/inventory/inventory-page";
 import { AppShell } from "@/components/layout/app-shell";
+import { ERPImportPanel } from "@/components/outbound/erp-import-panel";
 import { Badge, StatusBadge } from "@/components/shared/status-badge";
+import { WarehouseMapPage } from "@/components/warehouse-map/warehouse-map-page";
 import { Button, cn, EmptyState as Empty, PageHeader as PageHead } from "@/components/shared/ui";
 import { useI18n } from "@/i18n/provider";
 import { shouldShowDemoReset } from "@/lib/environment";
@@ -48,6 +51,7 @@ const routeTitleKeys: Record<string, string> = {
   receiving: "title.receiving", repair: "title.repair", move: "title.move",
   adjustment: "title.adjustment", "sn-search": "title.snSearch", transfers: "title.transfers",
   "bulk-sn": "title.bulkSn",
+  "warehouse-map": "title.warehouseMap",
   stocktake: "title.stocktake", audit: "title.audit", exceptions: "title.exceptions",
   reconciliation: "title.reconciliation", admin: "title.admin",
 };
@@ -67,7 +71,7 @@ export function WmsApp({ path }: { path: string[] }) {
     let active = true;
     const operationsSections = ["receiving", "repair", "move", "adjustment", "transfers", "stocktake", "exceptions", "admin"];
     const boundedPage =
-      ["dashboard", "inventory", "sn-search", "bulk-sn", "audit", "reconciliation"].includes(section) ||
+      ["dashboard", "inventory", "sn-search", "bulk-sn", "warehouse-map", "audit", "reconciliation"].includes(section) ||
       (section === "outbound" && !detailId);
     const readUrl =
       section === "outbound" && detailId && subroute !== "label"
@@ -110,7 +114,7 @@ export function WmsApp({ path }: { path: string[] }) {
         ? `/api/outbound/${encodeURIComponent(detailId)}`
         : operationsSections.includes(section)
           ? `/api/operations?section=${encodeURIComponent(section)}&warehouse=${encodeURIComponent(warehouse)}`
-        : ["dashboard", "inventory", "sn-search", "bulk-sn", "audit", "reconciliation"].includes(section) ||
+        : ["dashboard", "inventory", "sn-search", "bulk-sn", "warehouse-map", "audit", "reconciliation"].includes(section) ||
             (section === "outbound" && !detailId)
           ? "/api/bootstrap"
           : "/api/wms";
@@ -141,7 +145,27 @@ export function WmsApp({ path }: { path: string[] }) {
     await commit({ type: "resetDemo" }, t("success.demoReset"));
   }
 
-  if (!ready) return <div className="loading-shell"><div className="loading-bar" /><div>{t("common.loading")}</div></div>;
+  const title = t(routeTitleKeys[section] ?? "app.name");
+  const demoMode = shouldShowDemoReset({
+    appEnv: process.env.NEXT_PUBLIC_APP_ENV,
+    demoMode: process.env.NEXT_PUBLIC_DEMO_MODE,
+  });
+  if (!ready)
+    return (
+      <AppShell
+        path={path}
+        title={title}
+        warehouses={[]}
+        warehouse={warehouse}
+        setWarehouse={setWarehouse}
+        sidebarOpen={sidebarOpen}
+        setSidebarOpen={setSidebarOpen}
+        showDemoReset={false}
+        onResetDemo={resetDemo}
+      >
+        <div className="page-loading"><div className="loading-bar" /><div>{t("common.loading")}</div></div>
+      </AppShell>
+    );
   if (!state)
     return (
       <div className="startup-error" role="alert">
@@ -154,12 +178,6 @@ export function WmsApp({ path }: { path: string[] }) {
     const order = state.outboundOrders.find((row) => row.id === path[1]);
     return order ? <LabelView order={order} state={state} /> : <div className="empty">{t("common.orderNotFound")}</div>;
   }
-
-  const title = t(routeTitleKeys[section] ?? "app.name");
-  const demoMode = shouldShowDemoReset({
-    appEnv: process.env.NEXT_PUBLIC_APP_ENV,
-    demoMode: process.env.NEXT_PUBLIC_DEMO_MODE,
-  });
 
   return (
     <AppShell
@@ -177,11 +195,12 @@ export function WmsApp({ path }: { path: string[] }) {
     >
           {section === "dashboard" && <DashboardPage warehouse={warehouse} />}
           {section === "inventory" && <InventoryPage warehouse={warehouse} />}
+          {section === "warehouse-map" && <WarehouseMapPage warehouse={warehouse} />}
           {section === "outbound" &&
             (path[1] ? (
               <OutboundDetail state={state} orderId={path[1]} commit={commit} refresh={refreshCurrent} />
             ) : (
-              <OutboundList state={state} warehouse={warehouse} commit={commit} />
+              <OutboundList state={state} warehouse={warehouse} refresh={refreshCurrent} />
             ))}
           {section === "receiving" && <ReceivingView state={state} commit={commit} />}
           {section === "repair" && <RepairView state={state} commit={commit} />}
@@ -206,17 +225,17 @@ export function WmsApp({ path }: { path: string[] }) {
 function OutboundList({
   state,
   warehouse,
-  commit,
+  refresh,
 }: {
   state: WmsState;
   warehouse: "SYD" | "MEL" | "BNE";
-  commit: (command: WmsCommand, success: string) => Promise<boolean>;
+  refresh: () => Promise<void>;
 }) {
   const { t } = useI18n();
   const [query, setQuery] = useState("");
-  const [importSh, setImportSh] = useState("");
   const [queue, setQueue] = useState("Active");
   const [page, setPage] = useState(1);
+  const [reloadToken, setReloadToken] = useState(0);
   const [outboundPage, setOutboundPage] = useState<{ rows: OutboundOrder[]; total: number; totalPages: number }>({
     rows: state.outboundOrders,
     total: state.outboundOrders.length,
@@ -233,7 +252,7 @@ function OutboundList({
       })
       .catch(() => undefined);
     return () => controller.abort();
-  }, [page, queue, t, warehouse]);
+  }, [page, queue, reloadToken, t, warehouse]);
   const orders = outboundPage.rows.filter(
     (order) =>
       order.warehouseCode === warehouse &&
@@ -253,31 +272,8 @@ function OutboundList({
       <PageHead
         title={t("title.outbound")}
         subtitle={t("outbound.subtitle")}
-        actions={
-          <form
-            className="scanner-row"
-            onSubmit={async (event) => {
-              event.preventDefault();
-              if (!importSh.trim()) return;
-              const accepted = await commit(
-                { type: "importOutbound", shNo: importSh.trim().toUpperCase() },
-                t("success.outboundImported", { sh: importSh.trim().toUpperCase() }),
-              );
-               if (accepted) setImportSh("");
-            }}
-          >
-            <input
-              aria-label={t("outbound.importSh")}
-              placeholder={t("outbound.importExample")}
-              value={importSh}
-              onChange={(event) => setImportSh(event.target.value.toUpperCase())}
-            />
-            <Button className="primary" type="submit">
-              <Plus /> {t("outbound.import")}
-            </Button>
-          </form>
-        }
       />
+      <ERPImportPanel onImported={async () => { await refresh(); setReloadToken((value) => value + 1); }} />
       <div className="queue-tabs" role="tablist">
         {[
           ["Active", t("common.active")],
@@ -302,36 +298,39 @@ function OutboundList({
           </div>
           <Badge tone="amber">{t("outbound.active", { count: orders.filter((row) => row.status !== "Outbound").length })}</Badge>
         </div>
-        {orders.map((order) => {
-          const required = order.lines.reduce((sum, row) => sum + row.requiredQty, 0);
-          const prepared = order.lines.reduce((sum, row) => sum + row.preparedQty, 0);
-          return (
-            <div className="order-card" key={order.id}>
-              <div>
-                <div className="title mono">{order.shNo}</div>
-                <div className="subtle">{order.customerLabel}</div>
-              </div>
-              <div>
-                <span className="subtle">{t("common.pickup")}</span>
-                <div className="strong mono">{order.pickupCode ?? "Not generated"}</div>
-              </div>
-              <div>
-                <StatusBadge code={order.status} />
-              </div>
-              <div>
-                <span className="subtle">
-                  Prepared {prepared}/{required}
-                </span>
-                <div className="progress">
-                  <span style={{ width: `${Math.min(100, (prepared / required) * 100)}%` }} />
-                </div>
-              </div>
-              <Link className="btn small" href={`/outbound/${order.id}`}>
-                {t("common.open")} <ArrowRight />
-              </Link>
-            </div>
-          );
-        })}
+        <div className="table-wrap outbound-queue-table">
+          <table>
+            <thead><tr>
+              <th>SH / {t("summary.pickupCode")}</th>
+              <th>{t("outbound.skuSummary")}</th>
+              <th>{t("common.condition")}</th>
+              <th>{t("common.status")}</th>
+              <th>{t("outbound.progress")}</th>
+              <th>{t("outbound.nextAction")}</th>
+            </tr></thead>
+            <tbody>{orders.map((order) => {
+              const required = order.lines.reduce((sum, row) => sum + row.requiredQty, 0);
+              const prepared = order.lines.reduce((sum, row) => sum + row.preparedQty, 0);
+              const conditions = [...new Set(order.lines.map((line) => line.requiredCondition))];
+              const nextAction =
+                ["Imported", "Pending_Allocation"].includes(order.status) ? t("outbound.action.allocate") :
+                order.status === "Allocated" ? t("outbound.action.prepare") :
+                ["Prepared", "Partially_Prepared"].includes(order.status) ? t("outbound.action.completeSn") :
+                order.status === "Ready_for_Pickup" ? t("outbound.action.dispatch") : t("common.open");
+              return (
+                <tr key={order.id}>
+                  <td><Link className="queue-identifier mono" href={`/outbound/${order.id}`}>{order.shNo}</Link><span className="queue-secondary mono">{order.pickupCode ?? t("outbound.pickupWhenPrepared")}</span></td>
+                  <td><strong>{order.lines.map((line) => line.sku).slice(0, 2).join(" · ")}</strong><span className="queue-secondary">{t("outbound.lineUnits", { lines: order.lines.length, units: required })}</span></td>
+                  <td><div className="status-stack">{conditions.map((condition) => <StatusBadge code={condition} key={condition} />)}</div></td>
+                  <td><StatusBadge code={order.status} /></td>
+                  <td className="queue-progress"><strong>{prepared} / {required}</strong><div className="progress"><span style={{ width: `${required ? Math.min(100, (prepared / required) * 100) : 0}%` }} /></div></td>
+                  <td><Link className="btn small queue-action" href={`/outbound/${order.id}`}>{nextAction}<ArrowRight /></Link></td>
+                </tr>
+              );
+            })}</tbody>
+          </table>
+          {!orders.length && <Empty label={t("common.noResults")} />}
+        </div>
       </div>
       <div className="toolbar">
         <span className="subtle">{t("common.rowsPage", { rows: outboundPage.total, page, pages: outboundPage.totalPages || 1 })}</span>
@@ -1445,8 +1444,11 @@ function AdjustmentView({
 
 function SerialSearchView({ state }: { state: WmsState }) {
   const { locale, t } = useI18n();
+  const initialQuery = () => typeof window === "undefined"
+    ? ""
+    : new URLSearchParams(window.location.search).get("query")?.trim().toUpperCase() ?? "";
   const [draft, setDraft] = useState("");
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery);
   const [remoteResults, setRemoteResults] = useState<SerialNumber[]>([]);
   const searchRef = useRef<HTMLInputElement>(null);
   const lastSearch = useRef<{ value: string; at: number } | undefined>(undefined);
@@ -1963,36 +1965,7 @@ function AdminView({ state, resource }: { state: WmsState; resource: string }) {
           </div>
         )}
         {resource === "erp-mapping" && (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>{t("common.physicalWarehouse")}</th>
-                  <th>{t("common.erpWarehouse")}</th>
-                  <th>{t("common.mappedCondition")}</th>
-                  <th>{t("common.allocationPolicy")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>SYD</td>
-                  <td>悉尼物料仓</td>
-                  <td>
-                    <StatusBadge code="New" />
-                  </td>
-                  <td>{t("admin.normalAllocation")}</td>
-                </tr>
-                <tr>
-                  <td>SYD</td>
-                  <td>悉尼良品仓</td>
-                  <td>
-                    <StatusBadge code="Repair_Good" />
-                  </td>
-                  <td>{t("admin.repairGoodAllocation")}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+          <ERPHealthPanel />
         )}
       </div>
     </>

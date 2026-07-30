@@ -29,23 +29,27 @@ import { normalizeAppEnvironment, shouldShowEnvironmentBanner } from "@/lib/envi
 import { formatWarehouseDateTime } from "@/lib/warehouse-time";
 import { Badge } from "@/components/shared/status-badge";
 import { Button, cn } from "@/components/shared/ui";
+import { GlobalSearch } from "@/components/layout/global-search";
 
 const nav: Array<{
   label: TranslationKey;
   items: Array<[string, TranslationKey, typeof LayoutDashboard, string?]>;
 }> = [
   {
-    label: "nav.group.operations",
+    label: "nav.group.overview",
     items: [
       ["/dashboard", "nav.dashboard", LayoutDashboard],
-      ["/inventory", "nav.inventory", Boxes],
-      ["/outbound", "nav.outbound", PackageCheck],
+      ["/warehouse-map", "nav.warehouseMap", MapPin],
+    ],
+  },
+  {
+    label: "nav.group.operations",
+    items: [
       ["/receiving", "nav.receiving", PackageOpen],
+      ["/outbound", "nav.outbound", PackageCheck],
+      ["/bulk-sn", "nav.bulkSn", ScanLine],
       ["/repair", "nav.repair", Wrench],
       ["/move", "nav.move", Move],
-      ["/adjustment", "nav.adjustment", SlidersHorizontal, "adjustment:create"],
-      ["/sn-search", "nav.snSearch", ScanLine],
-      ["/bulk-sn", "nav.bulkSn", ScanLine],
       ["/transfers", "nav.transfers", Truck],
       ["/stocktake", "nav.stocktake", ClipboardCheck, "stocktake:approve"],
     ],
@@ -53,9 +57,12 @@ const nav: Array<{
   {
     label: "nav.group.control",
     items: [
-      ["/exceptions", "nav.exceptions", ShieldAlert],
+      ["/inventory", "nav.inventory", Boxes],
+      ["/sn-search", "nav.snSearch", ScanLine],
       ["/reconciliation", "nav.reconciliation", ClipboardCheck, "stocktake:approve"],
+      ["/exceptions", "nav.exceptions", ShieldAlert],
       ["/audit", "nav.audit", FileClock],
+      ["/adjustment", "nav.adjustment", SlidersHorizontal, "adjustment:create"],
     ],
   },
   {
@@ -136,6 +143,7 @@ export function AppShell({
             {showDemoReset && <Badge tone="teal">DEMO</Badge>}
           </div>
           <div className="topbar-actions">
+            <GlobalSearch warehouse={warehouse} />
             <select className="warehouse-select" aria-label={t("common.warehouse")} value={warehouse} onChange={(event) => setWarehouse(event.target.value as WarehouseCode)}>
               {warehouses.map((row) => <option key={row.code} value={row.code}>{row.code} · {row.name}</option>)}
             </select>

@@ -6,7 +6,7 @@ import { classifyFaultyReceipt, validateNewInboundBatch } from "@/domain/bulk-op
 import { normalizeSerialBatch } from "@/domain/bulk-serial";
 import { DomainError } from "@/domain/errors";
 import type { ERPAdapter } from "@/integrations/erp-adapter";
-import { MockERPAdapter } from "@/integrations/mock-erp-adapter";
+import { createERPAdapter } from "@/integrations/erp-adapter-factory";
 import { getPrisma } from "@/lib/prisma";
 import { InventoryRepository } from "@/repositories/inventory-repository";
 
@@ -22,7 +22,7 @@ async function actor(tx: Prisma.TransactionClient) {
 export class BulkOperationsService {
   constructor(
     private readonly prisma: PrismaClient = getPrisma(),
-    private readonly erp: ERPAdapter = new MockERPAdapter(),
+    private readonly erp: ERPAdapter = createERPAdapter(),
   ) {}
 
   async context(warehouseCode: string) {
