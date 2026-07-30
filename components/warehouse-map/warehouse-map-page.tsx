@@ -126,7 +126,8 @@ export function WarehouseMapPage({ warehouse }: { warehouse: WarehouseCode }) {
       (status === "Occupied" && location.state !== "Empty") ||
       (status === "Empty" && location.state === "Empty") ||
       (status === "Frozen" && location.frozenQty > 0) ||
-      (status === "Exception" && location.exceptionCount > 0))
+      (status === "Exception" && location.exceptionCount > 0) ||
+      (status === "Mixed" && location.state === "Mixed"))
   ), [condition, data?.locations, itemType, status]);
   const rackGroups = useMemo(() => {
     const groups = new Map<string, MapLocation[]>();
@@ -168,7 +169,7 @@ export function WarehouseMapPage({ warehouse }: { warehouse: WarehouseCode }) {
         </select>
         <select aria-label={t("common.status")} value={status} onChange={(event) => setStatus(event.target.value)}>
           <option value="">{t("map.allStates")}</option>
-          {["Occupied", "Empty", "Frozen", "Exception"].map((value) => <option value={value} key={value}>{t(`map.state.${value}`)}</option>)}
+          {["Occupied", "Empty", "Frozen", "Exception", "Mixed"].map((value) => <option value={value} key={value}>{t(`map.state.${value}`)}</option>)}
         </select>
         {(condition || itemType || status) && <Button type="button" onClick={() => { setCondition(""); setItemType(""); setStatus(""); }}>{t("map.clearFilters")}</Button>}
       </div>
@@ -180,10 +181,27 @@ export function WarehouseMapPage({ warehouse }: { warehouse: WarehouseCode }) {
               ["empty", data.summary.empty],
               ["mixed", data.summary.mixed],
               ["repair", data.summary.repair],
-              ["prepared", data.summary.prepared],
+              ["frozen", data.summary.prepared],
             ].map(([key, value]) => <div key={key}><strong>{value}</strong><span>{t(`map.summary.${key}`)}</span></div>)}
           </div>
           <div className="warehouse-floor">
+            <section className="service-area">
+              <div className="map-section-head"><div><span>{t("map.serviceZones")}</span><strong>{t("map.operationalAreas")}</strong></div></div>
+              <div className="service-grid">
+                {serviceLocations.map((location) => (
+                  <LocationCell
+                    location={location}
+                    highlighted={highlighted.has(location.code)}
+                    dimmed={highlighted.size > 0 && !highlighted.has(location.code)}
+                    selected={selectedCode === location.code}
+                    onSelect={setSelectedCode}
+                    t={t}
+                    service
+                    key={location.id}
+                  />
+                ))}
+              </div>
+            </section>
             <section className="rack-area">
               <div className="map-section-head"><div><span>{t("map.rackStorage")}</span><strong>{data.warehouse.code} · {data.warehouse.name}</strong></div><small>{t("map.rowOrientation")}</small></div>
               {rackGroups.map(([rack, locations]) => {
@@ -203,7 +221,17 @@ export function WarehouseMapPage({ warehouse }: { warehouse: WarehouseCode }) {
                             .sort((a, b) => sideRank(a.side) - sideRank(b.side));
                           return (
                             <div className="bay-cell" key={`${row}:${bay}`}>
-                              {slots.map((location) => <LocationCell location={location} highlighted={highlighted.has(location.code)} selected={selectedCode === location.code} onSelect={setSelectedCode} t={t} key={location.id} />)}
+                              {slots.map((location) => (
+                                <LocationCell
+                                  location={location}
+                                  highlighted={highlighted.has(location.code)}
+                                  dimmed={highlighted.size > 0 && !highlighted.has(location.code)}
+                                  selected={selectedCode === location.code}
+                                  onSelect={setSelectedCode}
+                                  t={t}
+                                  key={location.id}
+                                />
+                              ))}
                               {!slots.length && <span className="bay-empty">—</span>}
                             </div>
                           );
@@ -215,12 +243,6 @@ export function WarehouseMapPage({ warehouse }: { warehouse: WarehouseCode }) {
               })}
               {!rackGroups.length && <EmptyState label={t("map.noRackLocations")} />}
             </section>
-            <section className="service-area">
-              <div className="map-section-head"><div><span>{t("map.serviceZones")}</span><strong>{t("map.operationalAreas")}</strong></div></div>
-              <div className="service-grid">
-                {serviceLocations.map((location) => <LocationCell location={location} highlighted={highlighted.has(location.code)} selected={selectedCode === location.code} onSelect={setSelectedCode} t={t} service key={location.id} />)}
-              </div>
-            </section>
           </div>
         </>
       ) : <div className="map-skeleton" aria-label={t("common.loading")} />}
@@ -229,6 +251,11 @@ export function WarehouseMapPage({ warehouse }: { warehouse: WarehouseCode }) {
           <div className="drawer-head"><div><span>{t("map.locationDetail")}</span><h3 className="mono">{selectedCode}</h3></div><button type="button" onClick={() => { setSelectedCode(""); setDetail(undefined); }} aria-label={t("common.cancel")}><X /></button></div>
           {detail ? (
             <div className="drawer-content">
+              <div className="drawer-balance-summary">
+                <div><span>{t("common.physical")}</span><strong>{detail.inventory.reduce((sum, row) => sum + row.physicalQty, 0)}</strong></div>
+                <div><span>{t("common.frozen")}</span><strong>{detail.inventory.reduce((sum, row) => sum + row.frozenQty, 0)}</strong></div>
+                <div><span>{t("common.available")}</span><strong>{detail.inventory.reduce((sum, row) => sum + row.availableQty, 0)}</strong></div>
+              </div>
               <dl className="location-attributes">
                 <div><dt>{t("common.zone")}</dt><dd>{detail.location.zone}</dd></div>
                 <div><dt>{t("map.coordinates")}</dt><dd>{[detail.location.rack, detail.location.row, detail.location.bay, detail.location.side].filter((value) => value !== null && value !== undefined).join(" / ") || t("map.serviceZone")}</dd></div>
@@ -236,17 +263,20 @@ export function WarehouseMapPage({ warehouse }: { warehouse: WarehouseCode }) {
                 <div><dt>{t("map.exceptions")}</dt><dd>{detail.exceptionCount}</dd></div>
               </dl>
               <div className="drawer-section-title">{t("nav.inventory")}</div>
-              <div className="drawer-inventory">
-                {detail.inventory.map((row) => (
-                  <div key={row.id}>
-                    <div><strong className="mono">{row.sku ?? "—"}</strong><span>{row.model}</span></div>
-                    <StatusBadge code={row.condition} />
-                    <dl><div><dt>{t("common.physical")}</dt><dd>{row.physicalQty}</dd></div><div><dt>{t("common.frozen")}</dt><dd>{row.frozenQty}</dd></div><div><dt>{t("common.available")}</dt><dd>{row.availableQty}</dd></div></dl>
-                    {row.containerCode && <small>{row.containerCode}</small>}
-                  </div>
-                ))}
-                {!detail.inventory.length && <EmptyState label={t("map.emptyLocation")} />}
-              </div>
+              {detail.inventory.length ? <div className="drawer-stock-table"><table>
+                <thead><tr><th>{t("report.sku")}</th><th>{t("common.condition")}</th><th className="number">{t("common.physical")}</th><th className="number">{t("common.frozen")}</th><th className="number">{t("common.available")}</th></tr></thead>
+                <tbody>{detail.inventory.map((row) => <tr key={row.id}>
+                  <td><strong className="mono">{row.sku ?? "—"}</strong><span>{row.model}</span></td>
+                  <td><StatusBadge code={row.condition} /></td>
+                  <td className="number">{row.physicalQty}</td>
+                  <td className="number">{row.frozenQty}</td>
+                  <td className="number strong">{row.availableQty}</td>
+                </tr>)}</tbody>
+              </table></div> : <EmptyState label={t("map.emptyLocation")} />}
+              {detail.inventory.some((row) => row.containerCode) && <>
+                <div className="drawer-section-title">{t("map.containers")}</div>
+                <div className="container-chips">{[...new Set(detail.inventory.flatMap((row) => row.containerCode ? [row.containerCode] : []))].map((code) => <span className="mono" key={code}>{code}</span>)}</div>
+              </>}
               <div className="drawer-actions">
                 <Link className="btn primary" href={`/inventory?location=${encodeURIComponent(selectedCode)}`}>{t("map.openInventory")}</Link>
                 <Link className="btn" href={`/move?from=${encodeURIComponent(selectedCode)}`}><MoveRight />{t("map.moveStock")}</Link>
@@ -267,6 +297,7 @@ export function WarehouseMapPage({ warehouse }: { warehouse: WarehouseCode }) {
 function LocationCell({
   location,
   highlighted,
+  dimmed,
   selected,
   onSelect,
   t,
@@ -274,6 +305,7 @@ function LocationCell({
 }: {
   location: MapLocation;
   highlighted: boolean;
+  dimmed: boolean;
   selected: boolean;
   onSelect: (code: string) => void;
   t: (key: string, values?: Record<string, string | number>) => string;
@@ -282,7 +314,7 @@ function LocationCell({
   const Icon = stateIcon[location.state];
   return (
     <button
-      className={`map-location state-${location.state.toLowerCase()} ${service ? "service" : ""} ${highlighted ? "highlighted" : ""} ${selected ? "selected" : ""}`}
+      className={`map-location state-${location.state.toLowerCase()} ${service ? "service" : ""} ${highlighted ? "highlighted" : ""} ${dimmed ? "dimmed" : ""} ${selected ? "selected" : ""}`}
       type="button"
       onClick={() => onSelect(location.code)}
       aria-label={`${location.code} · ${t(`map.state.${location.state}`)}`}
@@ -291,6 +323,16 @@ function LocationCell({
       {!service && <small className="mono">{location.code}</small>}
       <strong>{location.skuCount > 1 ? t("map.mixedSku", { count: location.skuCount }) : location.primaryModel ?? t("map.empty")}</strong>
       <div className="location-qty">{location.physicalQty > 0 ? `× ${location.physicalQty}` : "—"}<span>{t(`map.state.${location.state}`)}</span></div>
+      <span className="location-tooltip" role="tooltip">
+        <b className="mono">{location.code}</b>
+        <span>{location.skuCount > 1 ? t("map.mixedSku", { count: location.skuCount }) : location.primarySku ?? t("map.empty")}</span>
+        <span>{t(`map.state.${location.state}`)}</span>
+        <dl>
+          <div><dt>{t("common.physical")}</dt><dd>{location.physicalQty}</dd></div>
+          <div><dt>{t("common.frozen")}</dt><dd>{location.frozenQty}</dd></div>
+          <div><dt>{t("common.available")}</dt><dd>{location.availableQty}</dd></div>
+        </dl>
+      </span>
     </button>
   );
 }

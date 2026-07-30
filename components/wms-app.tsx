@@ -31,6 +31,7 @@ import { BulkSerialPage } from "@/components/bulk-serial-page";
 import { ERPHealthPanel } from "@/components/admin/erp-health-panel";
 import { DashboardPage } from "@/components/dashboard/dashboard-page";
 import { InventoryPage } from "@/components/inventory/inventory-page";
+import { InventoryReportPage } from "@/components/reports/inventory-report-page";
 import { AppShell } from "@/components/layout/app-shell";
 import { ERPImportPanel } from "@/components/outbound/erp-import-panel";
 import { Badge, StatusBadge } from "@/components/shared/status-badge";
@@ -52,6 +53,7 @@ const routeTitleKeys: Record<string, string> = {
   adjustment: "title.adjustment", "sn-search": "title.snSearch", transfers: "title.transfers",
   "bulk-sn": "title.bulkSn",
   "warehouse-map": "title.warehouseMap",
+  reports: "title.inventoryReport",
   stocktake: "title.stocktake", audit: "title.audit", exceptions: "title.exceptions",
   reconciliation: "title.reconciliation", admin: "title.admin",
 };
@@ -71,7 +73,7 @@ export function WmsApp({ path }: { path: string[] }) {
     let active = true;
     const operationsSections = ["receiving", "repair", "move", "adjustment", "transfers", "stocktake", "exceptions", "admin"];
     const boundedPage =
-      ["dashboard", "inventory", "sn-search", "bulk-sn", "warehouse-map", "audit", "reconciliation"].includes(section) ||
+      ["dashboard", "inventory", "reports", "sn-search", "bulk-sn", "warehouse-map", "audit", "reconciliation"].includes(section) ||
       (section === "outbound" && !detailId);
     const readUrl =
       section === "outbound" && detailId && subroute !== "label"
@@ -114,7 +116,7 @@ export function WmsApp({ path }: { path: string[] }) {
         ? `/api/outbound/${encodeURIComponent(detailId)}`
         : operationsSections.includes(section)
           ? `/api/operations?section=${encodeURIComponent(section)}&warehouse=${encodeURIComponent(warehouse)}`
-        : ["dashboard", "inventory", "sn-search", "bulk-sn", "warehouse-map", "audit", "reconciliation"].includes(section) ||
+        : ["dashboard", "inventory", "reports", "sn-search", "bulk-sn", "warehouse-map", "audit", "reconciliation"].includes(section) ||
             (section === "outbound" && !detailId)
           ? "/api/bootstrap"
           : "/api/wms";
@@ -195,6 +197,7 @@ export function WmsApp({ path }: { path: string[] }) {
     >
           {section === "dashboard" && <DashboardPage warehouse={warehouse} />}
           {section === "inventory" && <InventoryPage warehouse={warehouse} />}
+          {section === "reports" && path[1] === "inventory" && <InventoryReportPage warehouse={warehouse} />}
           {section === "warehouse-map" && <WarehouseMapPage warehouse={warehouse} />}
           {section === "outbound" &&
             (path[1] ? (
@@ -399,16 +402,25 @@ function OutboundDetail({
     }) &&
     order.status !== "Outbound";
   const canPrepare = line.allocatedQty > line.preparedQty && order.status !== "Outbound";
-  const step =
-    order.status === "Outbound"
-      ? 5
-      : line.scannedSerials.length === line.requiredQty
-        ? 4
-        : line.preparedQty
-          ? 3
-          : line.allocatedQty
-            ? 2
-            : 1;
+  const allAllocated = order.lines.every((candidate) => candidate.allocatedQty >= candidate.requiredQty);
+  const allPrepared = order.lines.every((candidate) => candidate.preparedQty >= candidate.requiredQty);
+  const allSerialComplete = order.lines.every((candidate) => {
+    const requiresSerial = state.products.find((product) => product.sku === candidate.sku)?.serialTrackingRequired;
+    return !requiresSerial || candidate.scannedSerials.length >= candidate.requiredQty;
+  });
+  const readyForPickup = ["Ready_for_Pickup", "Outbound", "ERP_Synced"].includes(order.status);
+  const dispatched = ["Outbound", "ERP_Synced"].includes(order.status);
+  const erpSynced = order.erpSyncStatus === "Synced" || order.status === "ERP_Synced";
+  const workflow = [
+    { key: "outbound.step.erp", complete: true },
+    { key: "outbound.step.allocated", complete: allAllocated },
+    { key: "outbound.step.prepared", complete: allPrepared },
+    { key: "outbound.step.sn", complete: allSerialComplete },
+    { key: "outbound.step.ready", complete: readyForPickup },
+    { key: "outbound.step.dispatched", complete: dispatched },
+    { key: "outbound.step.erpSync", complete: erpSynced },
+  ];
+  const currentWorkflowIndex = workflow.findIndex((stage) => !stage.complete);
 
   async function scanSerial(event: FormEvent) {
     event.preventDefault();
@@ -572,10 +584,10 @@ function OutboundDetail({
           </>
         }
       />
-      <div className="stepbar">
-        {["outbound.step.erp", "outbound.step.allocated", "outbound.step.prepared", "outbound.step.sn", "outbound.step.dispatched"].map((key, index) => (
-          <div className={cn("step", index + 1 <= step && "done")} key={key}>
-            {t(key)}
+      <div className="stepbar outbound-workflow">
+        {workflow.map((stage, index) => (
+          <div className={cn("step", stage.complete && "done", index === currentWorkflowIndex && "current", currentWorkflowIndex >= 0 && index > currentWorkflowIndex && "blocked")} key={stage.key}>
+            <span>{index + 1}</span>{t(stage.key)}
           </div>
         ))}
       </div>

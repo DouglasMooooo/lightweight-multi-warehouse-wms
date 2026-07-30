@@ -68,7 +68,7 @@ export class GlobalSearchService {
           type: "SKU",
           primary: row.sku,
           secondary: row.model,
-          href: `/inventory?sku=${encodeURIComponent(row.sku)}`,
+          href: `/reports/inventory?q=${encodeURIComponent(row.sku)}`,
         })),
         ...locations.map((row) => ({
           type: "Location",

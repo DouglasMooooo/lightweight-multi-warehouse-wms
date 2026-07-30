@@ -4,6 +4,7 @@ import {
   Boxes,
   ClipboardCheck,
   FileClock,
+  FileSpreadsheet,
   LayoutDashboard,
   MapPin,
   Menu,
@@ -55,9 +56,10 @@ const nav: Array<{
     ],
   },
   {
-    label: "nav.group.control",
+    label: "nav.group.inventoryControl",
     items: [
       ["/inventory", "nav.inventory", Boxes],
+      ["/reports/inventory", "nav.inventoryReport", FileSpreadsheet],
       ["/sn-search", "nav.snSearch", ScanLine],
       ["/reconciliation", "nav.reconciliation", ClipboardCheck, "stocktake:approve"],
       ["/exceptions", "nav.exceptions", ShieldAlert],
