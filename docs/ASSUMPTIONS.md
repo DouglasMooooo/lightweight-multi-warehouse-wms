@@ -88,3 +88,13 @@ Until explicit cutover approval, the workbook remains the production operational
 - Transfer receipt is all-or-nothing in this Preview: every transfer SN must be scanned exactly once before confirmation. Partial receipt remains represented in the domain enum but is not exposed until a controlled partial-receipt policy is approved.
 - Sydney floor geometry is presentation-only configuration. Quantities, conditions, frozen state, search results and location detail are calculated from PostgreSQL; no capacity percentage is shown because no approved capacity master exists.
 - Activity Map remains disabled because the current bounded map query does not yet supply a reliable period-normalized activity metric.
+
+## Sprint 6.1 outbound review decisions
+
+- Review batches are temporary operator drafts stored in the current browser's local storage. They are not inventory, reservations, orders or ledger history. A lost browser draft has no stock effect.
+- CSV/XLSX upload is a read-only preview step. SN, SKU and SH columns are found by semantic header aliases in the first twenty rows; no workbook coordinate or formula is trusted.
+- ERP identity evidence for an SN cannot prove WMS physical presence. An ERP-resolved SN without a registered, located WMS serial remains `Unresolved` and cannot be confirmed.
+- When multiple outbound lines have the same SKU and condition, automatic matching is intentionally ambiguous. The operator must select an existing order line; this correction does not alter SKU, condition or historical demand.
+- Final outbound review confirmation is all-or-nothing for selected rows and all required serial-tracked lines. It revalidates inside a serializable transaction, converts exact SN allocations, and increases Frozen once without changing Physical Qty.
+- Transfer review uses the same temporary intake and review presentation, but confirmation still creates the native cross-warehouse Transfer operation. It never routes through Move.
+- Operator exclusion and remarks are review evidence only until confirmation. The final audit records the review reference and aggregate accepted SKU/condition evidence; excluded draft rows do not become stock transactions.

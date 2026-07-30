@@ -31,6 +31,7 @@ export interface TransferBatchInput {
   transferReference: string;
   rawValues: string[];
   allowRepair?: boolean;
+  reviewBatchReference?: string;
 }
 
 export class BatchTransferService {
@@ -154,11 +155,12 @@ export class BatchTransferService {
           entityId: created.id,
           businessReference: created.transferNo,
           after: {
+            reviewBatchReference: input.reviewBatchReference,
             sourceWarehouse: input.sourceWarehouse,
             destinationWarehouse: input.destinationWarehouse,
             groups: validation.groups.map(({ serialIds, ...group }) => ({ ...group, serialCount: serialIds.length })),
           } as Prisma.InputJsonValue,
-          remark: `${validation.summary.valid} scanned machine(s) grouped by Product and Condition.`,
+          remark: `${validation.summary.valid} reviewed machine(s) grouped by Product and Condition${input.reviewBatchReference ? ` from ${input.reviewBatchReference}` : ""}.`,
         },
       });
       return created;

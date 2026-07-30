@@ -62,11 +62,14 @@ export class QRScanService {
     const erpByNumber = new Map(
       erpMatches.filter((match) => match).map((match) => [match!.serialNumber.toUpperCase(), match!]),
     );
-    const erpSkus = [...new Set(erpMatches.flatMap((match) => match ? [match.sku] : []))];
-    const erpProducts = erpSkus.length
-      ? await this.prisma.product.findMany({ where: { sku: { in: erpSkus }, active: true } })
+    const evidenceSkus = [...new Set([
+      ...erpMatches.flatMap((match) => match ? [match.sku] : []),
+      ...parsed.flatMap((scan) => scan.sku ? [scan.sku] : []),
+    ])];
+    const evidenceProducts = evidenceSkus.length
+      ? await this.prisma.product.findMany({ where: { sku: { in: evidenceSkus }, active: true } })
       : [];
-    const productsBySku = new Map(erpProducts.map((product) => [product.sku, product]));
+    const productsBySku = new Map(evidenceProducts.map((product) => [product.sku, product]));
     const session = new BulkScanSession();
     for (let index = 0; index < parsed.length; index += 1) {
       const scan = parsed[index];
@@ -103,11 +106,13 @@ export class QRScanService {
           message: "Serial number resolved from ERP production data.",
         };
       } else {
+        const productEvidence = scan.sku ? productsBySku.get(scan.sku) : undefined;
         result = {
           scanId: `scan-${index + 1}`,
           rawValue: scan.rawValue,
           serialNumber: scan.serialNumber,
           sku: scan.sku,
+          model: productEvidence?.model,
           source: scan.source === "QR_STRUCTURED" ? "QR_STRUCTURED" : "MANUAL",
           validationStatus: "MANUAL_REVIEW",
           message: "Serial number could not be resolved without inventing a SKU.",

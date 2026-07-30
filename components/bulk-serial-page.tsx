@@ -1,11 +1,11 @@
 "use client";
 
-import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { WarehouseCode } from "@/domain/types";
 import { Badge, StatusBadge } from "@/components/shared/status-badge";
 import { Button, PageHeader } from "@/components/shared/ui";
 import { useI18n } from "@/i18n/provider";
+import { ScanReviewWorkbench } from "@/components/review/scan-review-workbench";
 
 type Mode = "launcher" | "NEW_INBOUND" | "FAULTY_RECEIVING" | "LEGACY_REPAIR_GOOD" | "OUTBOUND" | "BIND_EXISTING";
 type Context = {
@@ -58,6 +58,7 @@ export function BulkSerialPage({ warehouseCode }: { warehouseCode: WarehouseCode
   const [validation, setValidation] = useState<Validation>();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ text: string; error?: boolean }>();
+  const [selectedOutboundId, setSelectedOutboundId] = useState("");
   const lastScan = useRef<{ value: string; at: number }>({ value: "", at: 0 });
   const scanInputRef = useRef<HTMLInputElement>(null);
   const serialNumbers = useMemo(
@@ -102,6 +103,7 @@ export function BulkSerialPage({ warehouseCode }: { warehouseCode: WarehouseCode
     setSerialText("");
     setExpectedQty(0);
     setReason("");
+    setSelectedOutboundId("");
   }
 
   async function appendScan(event: FormEvent) {
@@ -266,6 +268,7 @@ export function BulkSerialPage({ warehouseCode }: { warehouseCode: WarehouseCode
   }
 
   if (mode === "OUTBOUND") {
+    const selectedOrder = context?.outboundOrders.find((order) => order.id === selectedOutboundId);
     return (
       <>
         <PageHeader title={t("bulk.mode.outbound")} subtitle={t("bulk.outboundHelp")} />
@@ -279,12 +282,31 @@ export function BulkSerialPage({ warehouseCode }: { warehouseCode: WarehouseCode
                   <td className="mono">{order.shNo}</td><td className="mono">{line.sku}</td><td>{line.model}</td>
                   <td>{line.requiredQty}</td><td>{line.assignedQty} / {line.requiredQty}</td>
                   <td><StatusBadge code={line.requiredCondition} /></td>
-                  <td><Link className="btn primary small" href={`/outbound/${order.id}`}>{t("bulk.manageSn")}</Link></td>
+                  <td><Button className="primary small" onClick={() => setSelectedOutboundId(order.id)}>{t("bulk.manageSn")}</Button></td>
                 </tr>
               )))}</tbody>
             </table>
           </div>
         </div>
+        {selectedOrder && (
+          <ScanReviewWorkbench
+            key={selectedOrder.id}
+            endpoint={`/api/outbound/${selectedOrder.id}/scans`}
+            persistenceKey={`outbound:${selectedOrder.id}`}
+            title={t("review.outboundTitle", { shNo: selectedOrder.shNo })}
+            subtitle={t("review.outboundSubtitle")}
+            confirmLabel={t("review.confirmPreparation")}
+            lines={selectedOrder.lines.map((line) => ({
+              id: line.id,
+              sku: line.sku,
+              model: line.model,
+              requiredCondition: line.requiredCondition,
+              requiredQty: line.requiredQty,
+              assignedQty: line.assignedQty,
+            }))}
+            onConfirmed={async () => selectMode("launcher")}
+          />
+        )}
       </>
     );
   }

@@ -889,3 +889,38 @@ tbody tr:last-child td { border-bottom: 0; }
   .outbound-line-progress > div { grid-template-columns: 1fr auto; }
   .outbound-line-progress > div > strong { grid-column: 1 / -1; }
 }
+
+/* Sprint 6.1 outbound and transfer review workbench */
+.review-workbench { border-color: #7eaaa1; }
+.review-input-grid { display: grid; grid-template-columns: 1.1fr 1fr .8fr; gap: 10px; padding: 14px 16px; background: #f8fbfa; border-bottom: 1px solid var(--line); }
+.review-input-card { display: flex; flex-direction: column; gap: 7px; padding: 11px; border: 1px solid var(--line); background: white; }
+.review-input-card > label:first-child { display: flex; align-items: center; gap: 6px; color: #405d57; font-size: 9px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; }
+.review-input-card > label svg { width: 15px; height: 15px; color: var(--teal); }
+.review-input-card > div { display: grid; grid-template-columns: 1fr auto; gap: 7px; }
+.review-input-card textarea { resize: vertical; font: 600 11px "SFMono-Regular", Consolas, monospace; }
+.review-input-card small { color: var(--muted); font-size: 8px; }
+.review-file-preview { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(220px, auto) auto; align-items: center; gap: 10px; padding: 11px 16px; border-bottom: 1px solid #d8c78f; background: #fff9e8; }
+.review-file-preview b, .review-file-preview span { display: block; }
+.review-file-preview span { margin-top: 3px; color: var(--muted); font-size: 9px; }
+.review-file-preview small.error { color: #9b3b31; }
+.review-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+.review-toolbar > div:last-child { display: flex; flex-wrap: wrap; gap: 6px; }
+.review-toolbar .btn svg, .review-table .btn svg, .batch-confirm-row .btn svg { width: 14px; height: 14px; }
+.review-summary { display: flex; flex-wrap: wrap; gap: 5px; }
+.review-summary span { padding: 5px 8px; border: 1px solid var(--line); background: #f7f9f8; color: var(--muted); font-size: 9px; }
+.review-summary span.valid { border-color: #9fcec4; background: #edf8f5; color: #075f54; }
+.review-summary span.warning { border-color: #e1c46f; background: #fff8e2; color: #7a5900; }
+.review-summary span.error { border-color: #ddb0a9; background: #fff0ed; color: #963f34; }
+.review-summary b { margin-left: 4px; color: inherit; font-size: 12px; }
+.review-table table { min-width: 1220px; }
+.review-table select { min-width: 220px; }
+.review-table input[type="text"], .review-table td > input:not([type]) { min-width: 150px; }
+.review-table td > b, .review-table td > small { display: block; }
+.review-table td > small { margin-top: 4px; max-width: 240px; color: var(--muted); font-size: 8px; }
+.review-table td .btn.small { margin-top: 6px; }
+.review-empty { padding: 34px 16px; color: var(--muted); text-align: center; }
+
+@media (max-width: 900px) {
+  .review-input-grid { grid-template-columns: 1fr; }
+  .review-toolbar, .review-file-preview { align-items: stretch; grid-template-columns: 1fr; flex-direction: column; }
+}
