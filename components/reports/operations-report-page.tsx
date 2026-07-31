@@ -46,6 +46,14 @@ const businessToday = () =>
     day: "2-digit",
   }).format(new Date());
 
+const businessDate = (value: string, timeZone: string) =>
+  new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(value));
+
 export function OperationsReportPage({ warehouse }: { warehouse: WarehouseCode }) {
   const { t } = useI18n();
   const [mode, setMode] = useState<"Weekly" | "Monthly">("Weekly");
@@ -123,7 +131,7 @@ export function OperationsReportPage({ warehouse }: { warehouse: WarehouseCode }
             <div>
               <span className="eyebrow">{mode === "Weekly" ? t("report.weekly") : t("report.monthly")}</span>
               <h3>{report.warehouse.code} · {report.warehouse.name}</h3>
-              <p>{report.period.from.slice(0, 10)} → {report.period.to.slice(0, 10)} · {report.warehouse.timezone}</p>
+              <p>{businessDate(report.period.from, report.warehouse.timezone)} → {businessDate(report.period.to, report.warehouse.timezone)} · {report.warehouse.timezone}</p>
             </div>
             <Badge tone={report.historyAvailable ? "teal" : "amber"}>
               {report.historyAvailable ? t("common.active") : t("report.unavailable")}
