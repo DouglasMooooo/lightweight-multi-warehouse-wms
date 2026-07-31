@@ -138,6 +138,26 @@ describe("Sprint 5.1 warehouse map search and structure", () => {
     } as never).map("SYD", "60E123");
     expect(result.matchingLocationCodes).toEqual(["R2-1-1-R"]);
   });
+
+  it("aggregates floor condition quantities without repeating mixed-location physical totals", async () => {
+    const decimal = (value: number) => new Prisma.Decimal(value);
+    const result = await new WarehouseMapService({
+      warehouse: { findUniqueOrThrow: vi.fn(async () => ({ id: "w1", code: "SYD", name: "Sydney", timezone: "Australia/Sydney" })) },
+      location: {
+        findMany: vi.fn(async () => [{
+          id: "l1", code: "FLEX-01", zone: "FLEX", rack: null, row: null, bay: null, side: null, serviceZone: true,
+          balances: [
+            { product: { sku: "SKU-NEW", model: "New" }, container: null, itemType: "Product", condition: "New", physicalQty: decimal(10), frozenQty: decimal(2) },
+            { product: { sku: "SKU-RG", model: "Repair Good" }, container: null, itemType: "Product", condition: "Repair_Good", physicalQty: decimal(5), frozenQty: decimal(0) },
+          ],
+        }]),
+      },
+      exception: { findMany: vi.fn(async () => []) },
+    } as never).floor("SYD");
+    const flex = result.areas.find((area) => area.id === "FLEX");
+    expect(flex?.physicalQty).toBe(15);
+    expect(flex?.conditionCounts).toEqual({ New: 10, Repair_Good: 5 });
+  });
 });
 
 describe("Sprint 5.1 bilingual presentation", () => {

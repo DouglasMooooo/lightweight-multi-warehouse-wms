@@ -43,6 +43,10 @@ export class WarehouseMapService {
       const itemTypeSet = new Set(location.balances.map((balance) => balance.itemType));
       const physicalQty = location.balances.reduce((sum, balance) => sum + number(balance.physicalQty), 0);
       const frozenQty = location.balances.reduce((sum, balance) => sum + number(balance.frozenQty), 0);
+      const conditionCounts = location.balances.reduce<Record<string, number>>((result, balance) => {
+        result[balance.condition] = (result[balance.condition] ?? 0) + number(balance.physicalQty);
+        return result;
+      }, {});
       const availableQty = physicalQty - frozenQty;
       const exceptionCount = exceptionCounts.get(location.code) ?? 0;
       const topBalance = [...location.balances].sort((a, b) => number(b.physicalQty) - number(a.physicalQty))[0];
@@ -60,6 +64,7 @@ export class WarehouseMapService {
         availableQty,
         skuCount: skuSet.size,
         conditions: [...conditionSet],
+        conditionCounts,
         itemTypes: [...itemTypeSet],
         containerCount: containerSet.size,
         exceptionCount,
@@ -145,8 +150,8 @@ export class WarehouseMapService {
         occupiedLocations: locations.filter((location) => location.physicalQty > 0).length,
         locationCount: locations.length,
         conditionCounts: locations.reduce<Record<string, number>>((result, location) => {
-          for (const condition of location.conditions)
-            result[condition] = (result[condition] ?? 0) + location.physicalQty;
+          for (const [condition, quantity] of Object.entries(location.conditionCounts))
+            result[condition] = (result[condition] ?? 0) + quantity;
           return result;
         }, {}),
         matchingLocationCodes: matching.map((location) => location.code),
