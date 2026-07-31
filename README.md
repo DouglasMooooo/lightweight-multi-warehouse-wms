@@ -48,15 +48,18 @@ The Sydney workbook remains read-only operational evidence. PostgreSQL-backed ba
 
 The application is a modular monolith:
 
-```text
-Next.js / React UI
--> bounded server APIs
--> application and domain services
--> Prisma
--> PostgreSQL
+```mermaid
+flowchart TD
+  Operator["Warehouse Operator"] --> UI["Next.js UI"]
+  UI --> API["Bounded APIs"]
+  API --> Services["Application / Domain Services"]
+  Services --> Prisma["Prisma"]
+  Prisma --> DB["Neon PostgreSQL"]
+  Services <--> Adapter["ERPAdapter"]
+  Adapter <--> Providers["Mock / Kingdee"]
 ```
 
-ERP integration stays behind `ERPAdapter`. Important physical operations are transactional and audited. Current balance comes from controlled `InventoryBalance` updates and is reconciled to the immutable `StockTransaction` ledger.
+ERP integration stays behind `ERPAdapter`. Important physical operations are transactional and audited. Current balance comes from controlled `InventoryBalance` updates and is reconciled to `StockTransaction`, which application workflows treat as append-only ledger evidence. Corrections create new compensating transactions rather than silently editing history.
 
 ## Tech Stack
 

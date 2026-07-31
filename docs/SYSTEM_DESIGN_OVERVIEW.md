@@ -93,6 +93,36 @@ Logical modules are Inventory, Serial, Outbound, Receiving, Repair, Transfer, Re
 - Localisation: English and Simplified Chinese in the presentation layer.
 - Testing: unit, domain and integration-style Vitest coverage plus type, lint and production-build checks.
 
+## Read Architecture
+
+```mermaid
+flowchart LR
+  Page["React Page"] --> API["Bounded Query API"]
+  API --> Service["Page / Query Service"]
+  Service --> Prisma["Prisma"]
+  Prisma --> DB["PostgreSQL"]
+```
+
+Operational pages own bounded query routes such as `/api/dashboard`, `/api/inventory`, `/api/outbound`, `/api/warehouse-map`, `/api/reports/inventory` and `/api/search`. Their server-side query services select only the records and aggregates needed by that page, use pagination or explicit result limits where appropriate, and defer location or movement detail until the operator requests it.
+
+This avoids making the legacy global `/api/wms` snapshot a dependency for new operator pages, reduces rows transferred to the browser, improves page-level latency and keeps query ownership close to the screen and workflow that consumes it. `/api/wms` remains only for legacy prototype compatibility; it is not the target read architecture.
+
+## Command / Mutation Architecture
+
+```mermaid
+flowchart LR
+  Action["Operator Action"] --> API["Command API"]
+  API --> App["Application Service"]
+  App --> Rules["Domain Validation"]
+  Rules --> Tx["Serializable Transaction"]
+  Tx --> Balance["Balance Mutation"]
+  Tx --> Ledger["Ledger Evidence"]
+  Tx --> SN["SN State"]
+  Tx --> Audit["Audit Record"]
+```
+
+Preparation, outbound, transfer, faulty receipt, Move and Adjustment enter through command-specific route handlers and application services. The domain validates identity, condition, warehouse, location, quantity and lifecycle eligibility before the transaction changes controlled balances. Where the operation affects inventory, its balance update, ledger evidence, SN state and audit record are written within the same database transaction. Review intake, lookup, file parsing, label preview and other pre-confirmation steps remain read-only.
+
 ## 8. Domain Model
 
 The core relational entities are:
@@ -100,7 +130,7 @@ The core relational entities are:
 - `Warehouse`, `Location` and `Container` for physical storage identity;
 - `Product` for SKU/model policy, item type, SN requirement and reporting eligibility;
 - `InventoryBalance` for current controlled balance projections;
-- `StockTransaction` for immutable operational ledger evidence;
+- `StockTransaction` for operational ledger evidence treated as append-only by application design;
 - `SerialNumber` for first-class unit identity and lifecycle state;
 - `OutboundOrder`, `OutboundOrderLine` and `OutboundAllocation` for demand and exact preparation;
 - `PickupBatch` for one Pickup Code across one or more SH documents;
@@ -108,7 +138,7 @@ The core relational entities are:
 - `RepairReturn` and `RepairJob` for faulty receipt and repair lifecycle;
 - `ERPSyncJob`, `Exception` and `AuditLog` for operational control.
 
-Current balance is read from `InventoryBalance` and reconciled to the append-only transaction ledger. Serial count is traceability evidence, not quantity authority.
+Current balance is read from `InventoryBalance` and reconciled to the operational transaction ledger. `StockTransaction` is treated as append-only by application design: corrections create new compensating transactions rather than silently editing historical movements. The current database schema does not independently prohibit update or delete of ledger rows. Serial count is traceability evidence, not quantity authority.
 
 ## 9. Inventory Rules
 
@@ -218,15 +248,67 @@ Commands return stable error codes and operator-readable messages. High-risk act
 
 `ERPAdapter` is the stable boundary. `MockERPAdapter` supports controlled internal demonstrations. `KingdeeERPAdapter` targets an explicitly configured normalized gateway and does not invent vendor request fields. `UnconfiguredERPAdapter` reports the missing integration honestly.
 
-Future ERP delivery should progress in phases: read outbound orders, SN/production lookup, outbound write-back, transfer integration, then reconciliation and monitoring. Idempotency, retryable jobs and asynchronous external sync prevent unstable ERP calls from rolling back confirmed warehouse operations.
+Confirmed physical dispatch and its pending `ERPSyncJob` evidence are recorded atomically in PostgreSQL. The external adapter call belongs after that warehouse commit:
+
+```mermaid
+flowchart LR
+  Commit["Warehouse transaction\nCOMMIT"] --> Job["ERP Sync Job"]
+  Job --> Synced["Synced"]
+  Job --> Retry["Retry"]
+  Job --> Review["Manual Review"]
+```
+
+This boundary reflects physical reality: an ERP timeout after goods have moved must not falsely reverse the WMS transaction. The current Preview persists pending sync-job evidence and exposes failures; a production-grade background worker, retry scheduler and real Kingdee write-back remain future work and are not claimed as verified.
+
+Future ERP delivery should progress in phases: read outbound orders, SN/production lookup, outbound write-back, transfer integration, then reconciliation and monitoring. Idempotency, durable jobs and post-commit external sync keep unstable ERP calls outside the physical warehouse transaction.
 
 ## 15. Database Design
 
-PostgreSQL constraints protect non-negative quantities, Frozen not exceeding Physical, relational references and unique business identities. Quantities use `Decimal(18,3)`. Important operations run in Serializable Prisma transactions with bounded conflict retries.
+Application/domain invariants prevent negative Physical, Frozen and In Transit balances and prevent Frozen from exceeding Physical. PostgreSQL independently enforces matching quantity `CHECK` constraints in the applied migrations, together with relational, uniqueness and type constraints. Quantities use `Decimal(18,3)`.
 
-`InventoryBalance` is the current quantity projection. `StockTransaction` is immutable evidence. `SerialNumber` records unit identity. This separation supports fast operational reads while retaining reconciliation capability.
+`InventoryBalance` is the current quantity projection. `StockTransaction` is treated as append-only operational ledger evidence by application design. Corrections are represented by new compensating transactions rather than silently editing historical movements; the schema does not physically block an administrator from updating or deleting a row. `SerialNumber` records unit identity. This separation supports fast operational reads while retaining reconciliation capability.
 
 The reference workbook is never modified. Workbook imports are semantic-header based, checksum-idempotent, server-side and explicitly controlled.
+
+## Transaction and Concurrency Strategy
+
+High-risk inventory mutations run inside PostgreSQL transactions using Prisma Serializable isolation where implemented. The main WMS command service and outbound review confirmation retry known Prisma serialization/write conflicts (`P2034`) and concurrent uniqueness conflicts (`P2002`) within a bounded three-attempt loop. Other bounded services, including batch transfer, bulk operations and serial registration, also use Serializable transactions but do not all implement the same retry wrapper.
+
+`InventoryRepository` calculates the next Physical, Frozen and In Transit values, validates the invariants, updates the balance and increments `InventoryBalance.version` in the enclosing transaction. The update does not compare the previous version in its `WHERE` clause, so this is not optimistic locking. The version counter is mutation-tracking evidence and future optimistic-concurrency support.
+
+Serializable isolation, relational constraints, quantity checks and the application invariant layer work together. The documentation does not claim that any single layer alone proves all warehouse rules.
+
+## Performance Architecture
+
+- Vercel functions are configured for Sydney `syd1`, aligned with the existing Sydney Neon Preview database.
+- Operator pages use bounded APIs and page-specific server queries rather than loading a global application snapshot.
+- Inventory and report lists are paginated; global search and map search have explicit result limits.
+- SN resolution uses set-based `IN` lookups for known serials and products where the workflow accepts a batch.
+- Warehouse Map loads location summary first, then location movements, exceptions and SN coverage only when detail is requested.
+- Inventory Report aggregates `InventoryBalance` in PostgreSQL and loads location drilldown separately.
+- `lib/prisma.ts` caches the Prisma client and PostgreSQL pool in the server process to avoid recreating them for each hot invocation.
+- Existing migrations add indexes for bounded inventory filters, business references and serial-allocation validation.
+
+These decisions follow measured Preview behaviour and the earlier IAD1/SYD1 comparison. This document does not fabricate production throughput, latency or concurrency targets; those require representative warehouse load testing.
+
+## Implementation Reference
+
+| Concern | Current implementation |
+| --- | --- |
+| Inventory balance mutation | `repositories/inventory-repository.ts` |
+| Main transactional commands | `services/server/wms-service.ts` |
+| ERP boundary | `integrations/erp-adapter.ts` |
+| ERP provider selection | `integrations/erp-adapter-factory.ts` |
+| QR/SN resolution | `services/server/qr-scan-service.ts` |
+| Outbound review | `services/server/outbound-batch-scan-service.ts` |
+| Transfer review and command | `services/server/transfer-review-service.ts`, `services/server/batch-transfer-service.ts` |
+| Inventory report | `services/server/inventory-report-service.ts` |
+| Warehouse map | `services/server/warehouse-map-service.ts` |
+| Label policy and preview | `domain/label-policy.ts`, `services/server/label-preview-service.ts` |
+| Bounded page queries | `services/server/page-query-service.ts` |
+| Global operational search | `services/server/global-search-service.ts` |
+| Environment safety | `lib/environment.ts` |
+| Prisma client / pool | `lib/prisma.ts` |
 
 ## 16. Deployment Architecture
 

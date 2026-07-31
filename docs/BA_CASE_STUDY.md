@@ -49,7 +49,7 @@ This prototype tests a target-state process and the business rules required to m
 
 - Inventory correctness over convenience.
 - Atomic database transactions for physical operations.
-- Append-only historical transaction evidence.
+- Application-enforced append-only historical transaction evidence.
 - Bounded APIs and set-based SN lookup.
 - Same-region Preview compute and database.
 - Workstation-first and tablet-usable UX.
@@ -97,7 +97,7 @@ flowchart LR
 - Balance grain by warehouse, location, optional container, optional product, item type and condition.
 - First-class SN identity with warehouse, location, condition and lifecycle status.
 - Lifecycle timestamps for import, allocation, preparation, pickup readiness, dispatch, transfer and repair.
-- Immutable transactions with operation ID, actor, business reference, quantity deltas and effective time.
+- Operational ledger transactions with operation ID, actor, business reference, quantity deltas and effective time; application workflows correct history with compensating entries.
 - Explicit legacy traceability-gap classification.
 
 Spreadsheet columns are mapped by semantic header. Display-only occupancy placeholders and formula/helper fields are not inventory concepts.
@@ -162,6 +162,15 @@ Validation does not claim production Kingdee integration, enterprise security or
 - Quantity, SN identity and location evidence have distinct authority.
 - Warehouse exceptions are first-class work.
 - The prototype can support structured stakeholder feedback instead of abstract requirements discussion.
+
+## Implementation Trade-offs
+
+- A modular monolith keeps one deployable system and one inventory transaction boundary; microservices would add coordination cost without current scale evidence.
+- Review batches remain temporary browser drafts because they have no inventory effect; production recovery of unfinished operator drafts would require an approved persistence and ownership policy.
+- `InventoryBalance` supports fast current-state reads while `StockTransaction` provides application-level append-only reconciliation evidence.
+- React + SVG communicates warehouse structure without introducing a 3D engine; the geometry is intentionally operational, not surveyed-to-scale.
+- The Preview persists ERP sync-job evidence after physical confirmation, but it does not claim a production worker, retry scheduler or verified Kingdee write-back.
+- Prototype authentication keeps the internal demo focused on process and business rules; enterprise SSO, RBAC enforcement and security assurance remain explicit future requirements.
 
 ## Open Questions
 

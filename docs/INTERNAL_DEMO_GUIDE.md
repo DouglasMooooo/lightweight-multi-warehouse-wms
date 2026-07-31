@@ -19,7 +19,7 @@ Do not position it as a complete replacement production WMS.
 
 **Click:** Dashboard.
 
-**Show:** To Prepare, Awaiting Pickup, Repair Queue, In Transit, exceptions, current product availability and recent audit activity.
+**Show:** To Prepare, Awaiting Pickup, Repair Queue, In Transit, exceptions, Available Units and recent audit activity.
 
 **Business problem:** Warehouse priorities are otherwise scattered across ERP documents and spreadsheets.
 

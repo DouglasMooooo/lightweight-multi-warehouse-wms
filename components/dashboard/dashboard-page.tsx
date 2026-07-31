@@ -28,7 +28,7 @@ interface DashboardData {
     outboundToday: number; faultyReturns: number; repairQueue: number; transfersInTransit: number;
     exceptions: number; erpSyncFailures: number;
   };
-  availableProduct: number;
+  availableUnits: number;
   inboundToday: number;
   repairToday: number;
   recentAudit: Array<{ id: string; operation: string; businessReference?: string; entityType?: string; at: string; actor: string }>;
@@ -63,7 +63,7 @@ export function DashboardPage({ warehouse }: { warehouse: WarehouseCode }) {
     tasks.toPrepare ? { text: t("dashboard.ordersToPrepare", { count: tasks.toPrepare }), href: "/outbound" } : null,
     tasks.repairQueue ? { text: t("dashboard.repairsWaiting", { count: tasks.repairQueue }), href: "/repair" } : null,
     tasks.exceptions ? { text: t("dashboard.exceptionsOpen", { count: tasks.exceptions }), href: "/exceptions" } : null,
-    tasks.erpSyncFailures ? { text: t("dashboard.erpFailures", { count: tasks.erpSyncFailures }), href: "/admin/erp-mapping" } : null,
+    tasks.erpSyncFailures ? { text: t("dashboard.erpFailures", { count: tasks.erpSyncFailures }), href: "/exceptions" } : null,
   ].filter(Boolean) as Array<{ text: string; href: string }>;
   const quickOperations = [
     ["dashboard.quick.importErp", "/outbound#import-erp", CloudDownload],
@@ -95,7 +95,7 @@ export function DashboardPage({ warehouse }: { warehouse: WarehouseCode }) {
         </div>
       </section>
       <div className="operational-strip">
-        <div><Boxes /><span>{t("dashboard.availableProduct")}</span><strong>{data.availableProduct}</strong></div>
+        <div><Boxes /><span>{t("dashboard.availableUnits")}</span><strong>{data.availableUnits}</strong></div>
         <div><PackageCheck /><span>{t("dashboard.outboundToday")}</span><strong>{tasks.outboundToday}</strong></div>
         <div><PackagePlus /><span>{t("dashboard.inboundToday")}</span><strong>{data.inboundToday}</strong></div>
         <div><Wrench /><span>{t("dashboard.repairToday")}</span><strong>{data.repairToday}</strong></div>

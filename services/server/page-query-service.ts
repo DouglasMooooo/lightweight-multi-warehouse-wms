@@ -78,7 +78,7 @@ export class PageQueryService {
         exceptions,
         erpSyncFailures,
       },
-      availableProduct:
+      availableUnits:
         number(available._sum.physicalQty ?? new Prisma.Decimal(0)) -
         number(available._sum.frozenQty ?? new Prisma.Decimal(0)),
       inboundToday: number(inboundToday._sum.quantity ?? new Prisma.Decimal(0)),
