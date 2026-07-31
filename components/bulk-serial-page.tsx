@@ -33,7 +33,8 @@ type Validation = {
   summary: { total: number; valid: number; invalid: number };
   results: Array<{
     serialNumber: string; valid: boolean; code: string; sku?: string; model?: string;
-    shNo?: string; existingStatus?: string; destination?: string; erpFound?: boolean;
+    shNo?: string; existingStatus?: string; previousStatus?: string; returnStatus?: string;
+    destination?: string; repairLocation?: string; erpFound?: boolean;
   }>;
   physicalQty?: number;
   registeredPhysicalSerials?: number;
@@ -215,7 +216,10 @@ export function BulkSerialPage({ warehouseCode }: { warehouseCode: WarehouseCode
       const body = await response.json();
       if (!response.ok) throw new Error(friendlyError(body.code, body.error));
       setValidation(body);
-      if (file) setSerialText(body.results.map((row: { serialNumber: string }) => row.serialNumber).join("\n"));
+      if (file) {
+        setSerialText(body.results.map((row: { serialNumber: string }) => row.serialNumber).join("\n"));
+        if (mode === "NEW_INBOUND") setExpectedQty(body.expectedQty ?? body.results.length);
+      }
     } catch (error) {
       setMessage({ text: error instanceof Error ? error.message : t("bulk.validationFailed"), error: true });
     } finally {
@@ -452,16 +456,39 @@ export function BulkSerialPage({ warehouseCode }: { warehouseCode: WarehouseCode
           )}
           <div className="table-wrap">
             <table>
-              <thead><tr><th>SN</th><th>ERP</th><th>SH</th><th>SKU</th><th>{t("common.model")}</th><th>{t("bulk.destination")}</th><th>{t("bulk.result")}</th></tr></thead>
-              <tbody>{validation.results.map((row, index) => (
-                <tr key={`${row.serialNumber}:${index}`}>
-                  <td className="mono">{row.serialNumber}</td>
-                  <td>{row.erpFound === undefined ? "—" : row.erpFound ? t("common.yes") : t("common.no")}</td>
-                  <td className="mono">{row.shNo || "—"}</td><td className="mono">{row.sku || "—"}</td>
-                  <td>{row.model || "—"}</td><td>{row.destination || locationCode}</td>
-                  <td><Badge tone={row.valid ? "teal" : "red"}>{t(`bulk.result.${row.code}`)}</Badge></td>
-                </tr>
-              ))}</tbody>
+              {mode === "FAULTY_RECEIVING" ? (
+                <>
+                  <thead><tr>
+                    <th>SN</th><th>{t("bulk.originalSh")}</th><th>SKU</th><th>{t("common.model")}</th>
+                    <th>{t("bulk.previousStatus")}</th><th>{t("bulk.returnStatus")}</th>
+                    <th>{t("bulk.repairLocation")}</th><th>{t("bulk.result")}</th>
+                  </tr></thead>
+                  <tbody>{validation.results.map((row, index) => (
+                    <tr key={`${row.serialNumber}:${index}`}>
+                      <td className="mono">{row.serialNumber}</td>
+                      <td className="mono">{row.shNo || "—"}</td>
+                      <td className="mono">{row.sku || "—"}</td>
+                      <td>{row.model || "—"}</td>
+                      <td><StatusBadge code={row.previousStatus || row.existingStatus || "Unknown"} /></td>
+                      <td><StatusBadge code={row.returnStatus || "Repair"} /></td>
+                      <td>{row.repairLocation || row.destination || locationCode}</td>
+                      <td><Badge tone={row.valid ? "teal" : "red"}>{t(`bulk.result.${row.code}`)}</Badge></td>
+                    </tr>
+                  ))}</tbody>
+                </>
+              ) : (
+                <>
+                  <thead><tr><th>SN</th><th>SKU</th><th>{t("common.model")}</th><th>{t("bulk.destination")}</th><th>{t("bulk.result")}</th></tr></thead>
+                  <tbody>{validation.results.map((row, index) => (
+                    <tr key={`${row.serialNumber}:${index}`}>
+                      <td className="mono">{row.serialNumber}</td>
+                      <td className="mono">{row.sku || "—"}</td>
+                      <td>{row.model || "—"}</td><td>{row.destination || locationCode}</td>
+                      <td><Badge tone={row.valid ? "teal" : "red"}>{t(`bulk.result.${row.code}`)}</Badge></td>
+                    </tr>
+                  ))}</tbody>
+                </>
+              )}
             </table>
           </div>
         </div>

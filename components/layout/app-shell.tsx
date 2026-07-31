@@ -60,6 +60,7 @@ const nav: Array<{
     items: [
       ["/inventory", "nav.inventory", Boxes],
       ["/reports/inventory", "nav.inventoryReport", FileSpreadsheet],
+      ["/reports/operations", "nav.operationsReport", FileSpreadsheet],
       ["/sn-search", "nav.snSearch", ScanLine],
       ["/reconciliation", "nav.reconciliation", ClipboardCheck, "stocktake:approve"],
       ["/exceptions", "nav.exceptions", ShieldAlert],

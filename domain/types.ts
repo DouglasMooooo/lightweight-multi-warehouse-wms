@@ -34,6 +34,8 @@ export interface Warehouse {
   code: WarehouseCode;
   name: string;
   timezone: string;
+  floorAreaSqm?: number;
+  operationalAreaSqm?: number;
   active: boolean;
 }
 

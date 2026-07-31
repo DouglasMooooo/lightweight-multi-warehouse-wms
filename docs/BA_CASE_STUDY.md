@@ -197,3 +197,34 @@ The recommended positioning is:
 > This is a working WMS prototype based on observed warehouse workflows. The focus is process analysis, requirements, inventory and SN business rules, ERP/WMS boundaries, exception handling and target-state system design.
 
 It should not be positioned as a complete replacement production WMS.
+
+## System Automation
+
+The target operating model is one data input where possible, automatic matching where reliable, and operator attention only for physical confirmation or exceptions. The implemented Preview demonstrates:
+
+- ERP task creation behind `ERPAdapter`;
+- batch Pickup Code label generation and one print/PDF workflow;
+- set-based SN lookup and SKU/model matching;
+- original SH lookup for faulty returns, with ERP fallback;
+- batch validation for faulty returns and expected inbound datasets;
+- controlled workflow transitions and audit records;
+- one-document cross-warehouse transfer linkage;
+- durable ERP sync jobs after physical commit; and
+- consistent weekly/monthly operational KPI calculations.
+
+Notification event names are a target integration boundary, but the Preview does not pretend to send email or Teams messages.
+
+## Human Control
+
+The warehouse operator still confirms what software cannot safely infer:
+
+- goods are physically present at receipt;
+- the correct stock was physically picked;
+- prepared stock is placed in the selected staging/dispatch location;
+- unresolved or conflicting SN rows are corrected or excluded;
+- damaged and incorrect goods are judged by a person;
+- destination staff confirm transfer receipt;
+- dispatch staff confirm the final physical handover; and
+- supervisors approve exceptional stock adjustments.
+
+This separation reduces repetitive administration without allowing expected data or an external timeout to overwrite warehouse reality.

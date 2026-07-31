@@ -3,6 +3,7 @@ import "server-only";
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 import { DomainError } from "@/domain/errors";
 import {
+  calculateOperationalKpis,
   calendarMonth,
   mondayToSunday,
   operationalMovementMetrics,
@@ -25,8 +26,45 @@ export class OperationalReportingService {
     return this.period(warehouseId, period.from, period.to);
   }
 
+  async reports(input: {
+    mode: "Weekly" | "Monthly";
+    warehouseCode: string;
+    containing: Date;
+  }) {
+    const warehouses = await this.prisma.warehouse.findMany({
+      where: {
+        active: true,
+        code: input.warehouseCode === "ALL" ? undefined : input.warehouseCode,
+      },
+      orderBy: { code: "asc" },
+    });
+    if (!warehouses.length)
+      throw new DomainError("No active warehouse matches this report filter.", "WAREHOUSE_NOT_FOUND");
+    const reports = await Promise.all(warehouses.map((warehouse) =>
+      input.mode === "Weekly"
+        ? this.weekly(warehouse.id, input.containing)
+        : this.monthly(
+            warehouse.id,
+            input.containing.getUTCFullYear(),
+            input.containing.getUTCMonth(),
+          ),
+    ));
+    return { mode: input.mode, warehouseFilter: input.warehouseCode, reports };
+  }
+
   async period(warehouseId: string, from: Date, to: Date) {
-    const [orders, returns, repairJobs, balances, movements, openExceptions] = await Promise.all([
+    const [
+      warehouse,
+      orders,
+      returns,
+      repairJobs,
+      balances,
+      movements,
+      postPeriodDeltas,
+      historyBeforePeriod,
+      openExceptions,
+    ] = await Promise.all([
+      this.prisma.warehouse.findUniqueOrThrow({ where: { id: warehouseId } }),
       this.prisma.outboundOrder.findMany({
         where: {
           warehouseId,
@@ -54,6 +92,13 @@ export class OperationalReportingService {
       this.prisma.inventoryBalance.findMany({ where: { warehouseId } }),
       this.prisma.stockTransaction.findMany({
         where: { warehouseId, effectiveAt: { gte: from, lte: to } },
+      }),
+      this.prisma.stockTransaction.aggregate({
+        where: { warehouseId, effectiveAt: { gt: to } },
+        _sum: { physicalDelta: true, frozenDelta: true, inTransitDelta: true },
+      }),
+      this.prisma.stockTransaction.count({
+        where: { warehouseId, effectiveAt: { lte: from } },
       }),
       this.prisma.exception.count({ where: { status: { not: "Resolved" } } }),
     ]);
@@ -92,7 +137,32 @@ export class OperationalReportingService {
     const newInventory = balances
       .filter((row) => row.condition === "New")
       .reduce((sum, row) => sum + Number(row.physicalQty), 0);
+    const currentPhysical = balances.reduce((sum, row) => sum + Number(row.physicalQty), 0);
+    const currentFrozen = balances.reduce((sum, row) => sum + Number(row.frozenQty), 0);
+    const currentInTransit = balances.reduce((sum, row) => sum + Number(row.inTransitQty), 0);
+    const closingPhysical = currentPhysical - Number(postPeriodDeltas._sum.physicalDelta ?? 0);
+    const closingFrozen = currentFrozen - Number(postPeriodDeltas._sum.frozenDelta ?? 0);
+    const closingInTransit = currentInTransit - Number(postPeriodDeltas._sum.inTransitDelta ?? 0);
+    const periodPhysicalDelta = movements.reduce((sum, row) => sum + Number(row.physicalDelta), 0);
+    const openingPhysical = closingPhysical - periodPhysicalDelta;
+    const historyAvailable = historyBeforePeriod > 0;
+    const periodDays = Math.max(1, Math.round((to.getTime() - from.getTime() + 1) / 86_400_000));
+    const kpis = calculateOperationalKpis({
+      openingPhysical: historyAvailable ? openingPhysical : undefined,
+      closingPhysical: historyAvailable ? closingPhysical : undefined,
+      outboundQty: movement.outboundQty,
+      periodDays,
+      floorAreaSqm: warehouse.floorAreaSqm ? Number(warehouse.floorAreaSqm) : undefined,
+    });
     return {
+      warehouse: {
+        id: warehouse.id,
+        code: warehouse.code,
+        name: warehouse.name,
+        timezone: warehouse.timezone,
+        floorAreaSqm: warehouse.floorAreaSqm ? Number(warehouse.floorAreaSqm) : undefined,
+        operationalAreaSqm: warehouse.operationalAreaSqm ? Number(warehouse.operationalAreaSqm) : undefined,
+      },
       period: { from: from.toISOString(), to: to.toISOString() },
       ...outbound,
       ...movement,
@@ -112,6 +182,25 @@ export class OperationalReportingService {
       repairGoodInventory: balances
         .filter((row) => row.condition === "Repair_Good")
         .reduce((sum, row) => sum + Number(row.physicalQty), 0),
+      openingPhysical: historyAvailable ? openingPhysical : undefined,
+      closingPhysical: historyAvailable ? closingPhysical : undefined,
+      averagePhysical: kpis.averagePhysical,
+      frozenAwaitingPickup: closingFrozen,
+      inTransit: closingInTransit,
+      physicalByCondition: Object.fromEntries(
+        ["New", "Repair_Good", "Repair", "Scrap", "Material"].map((condition) => [
+          condition,
+          balances
+            .filter((row) => row.condition === condition)
+            .reduce((sum, row) => sum + Number(row.physicalQty), 0),
+        ]),
+      ),
+      operationalTurnover: kpis.operationalTurnover,
+      inventoryDays: kpis.inventoryDays,
+      outboundDensity: kpis.outboundDensity,
+      inventoryDensity: kpis.inventoryDensity,
+      areaConfigured: kpis.areaConfigured,
+      historyAvailable,
       openOperationalExceptions: openExceptions,
     };
   }

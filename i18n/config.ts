@@ -10,16 +10,18 @@ import sprint6En from "./messages/sprint6-en.json";
 import sprint6ZhCN from "./messages/sprint6-zh-CN.json";
 import sprint61En from "./messages/sprint61-en.json";
 import sprint61ZhCN from "./messages/sprint61-zh-CN.json";
+import finalPatchEn from "./messages/final-patch-en.json";
+import finalPatchZhCN from "./messages/final-patch-zh-CN.json";
 
 export const supportedLocales = ["en", "zh-CN"] as const;
 export type Locale = (typeof supportedLocales)[number];
-export type TranslationKey = keyof typeof en | keyof typeof bulkEn | keyof typeof sprint5En | keyof typeof sprint51En | keyof typeof sprint6En | keyof typeof sprint61En;
+export type TranslationKey = keyof typeof en | keyof typeof bulkEn | keyof typeof sprint5En | keyof typeof sprint51En | keyof typeof sprint6En | keyof typeof sprint61En | keyof typeof finalPatchEn;
 export const defaultLocale: Locale = "en";
 export const localeStorageKey = "wms-ui-locale";
 
 const messages: Record<Locale, Record<string, string>> = {
-  en: { ...en, ...bulkEn, ...sprint5En, ...sprint51En, ...sprint6En, ...sprint61En },
-  "zh-CN": { ...zhCN, ...bulkZhCN, ...sprint5ZhCN, ...sprint51ZhCN, ...sprint6ZhCN, ...sprint61ZhCN },
+  en: { ...en, ...bulkEn, ...sprint5En, ...sprint51En, ...sprint6En, ...sprint61En, ...finalPatchEn },
+  "zh-CN": { ...zhCN, ...bulkZhCN, ...sprint5ZhCN, ...sprint51ZhCN, ...sprint6ZhCN, ...sprint61ZhCN, ...finalPatchZhCN },
 };
 
 export function isLocale(value: unknown): value is Locale {

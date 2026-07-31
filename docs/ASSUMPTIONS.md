@@ -98,3 +98,14 @@ Until explicit cutover approval, the workbook remains the production operational
 - Final outbound review confirmation is all-or-nothing for selected rows and all required serial-tracked lines. It revalidates inside a serializable transaction, converts exact SN allocations, and increases Frozen once without changing Physical Qty.
 - Transfer review uses the same temporary intake and review presentation, but confirmation still creates the native cross-warehouse Transfer operation. It never routes through Move.
 - Operator exclusion and remarks are review evidence only until confirmation. The final audit records the review reference and aggregate accepted SKU/condition evidence; excluded draft rows do not become stock transactions.
+
+## Final business automation and reporting decisions
+
+- Batch label selection is limited to existing Prepared or Ready_for_Pickup orders in one physical warehouse. The server reloads authoritative order lines and rejects stale or ineligible selections.
+- One Pickup Code remains one A4 page. Missing Pickup Code falls back to SH No; different ERP warehouses remain separate rows on that page.
+- Faulty receiving uses WMS identity and dispatched allocation history before ERP fallback. A missing original SH, missing SKU, wrong warehouse or unresolved identity remains an exception and is not guessed.
+- A Supply Chain expected-inbound file can populate a bounded one-SKU batch and expected quantity. Final physical receipt still requires explicit operator confirmation.
+- Weekly/monthly opening and closing balances are reconstructed only when ledger history exists for the requested period. Unsupported historical depth returns unavailable rather than an invented KPI.
+- Warehouse floor and operational area are optional nullable master-data fields. No Preview warehouse area was fabricated; area productivity reports `Area data not configured` until approved measurements are entered.
+- Operational Inventory Turnover is Outbound Units divided by Average Physical Inventory. It is an operational warehouse measure, not accounting inventory turnover.
+- Notification channel delivery remains future work. The Preview documents event boundaries but does not claim email, Teams or Kingdee production connectivity.

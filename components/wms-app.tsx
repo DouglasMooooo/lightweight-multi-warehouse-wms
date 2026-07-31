@@ -33,9 +33,11 @@ import { ERPHealthPanel } from "@/components/admin/erp-health-panel";
 import { DashboardPage } from "@/components/dashboard/dashboard-page";
 import { InventoryPage } from "@/components/inventory/inventory-page";
 import { InventoryReportPage } from "@/components/reports/inventory-report-page";
+import { OperationsReportPage } from "@/components/reports/operations-report-page";
 import { AppShell } from "@/components/layout/app-shell";
 import { ERPImportPanel } from "@/components/outbound/erp-import-panel";
 import { OutboundBatchScanner } from "@/components/outbound/outbound-batch-scanner";
+import { BatchLabelPreview } from "@/components/outbound/batch-label-preview";
 import { Badge, StatusBadge } from "@/components/shared/status-badge";
 import { WarehouseMapPage } from "@/components/warehouse-map/warehouse-map-page";
 import { BatchTransferPanel } from "@/components/transfers/batch-transfer-panel";
@@ -68,6 +70,7 @@ export function WmsApp({ path }: { path: string[] }) {
   const section = path[0] ?? "dashboard";
   const detailId = path[1];
   const subroute = path[2];
+  const isBatchLabelPreview = section === "outbound" && detailId === "batch-labels" && subroute === "preview";
   const [state, setState] = useState<WmsState | null>(null);
   const [ready, setReady] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -81,7 +84,9 @@ export function WmsApp({ path }: { path: string[] }) {
       ["dashboard", "inventory", "reports", "sn-search", "bulk-sn", "warehouse-map", "audit", "reconciliation"].includes(section) ||
       (section === "outbound" && !detailId);
     const readUrl =
-      section === "outbound" && detailId && subroute !== "label"
+      isBatchLabelPreview
+        ? "/api/bootstrap"
+        : section === "outbound" && detailId && subroute !== "label"
         ? `/api/outbound/${encodeURIComponent(detailId)}`
         : operationsSections.includes(section)
           ? `/api/operations?section=${encodeURIComponent(section)}&warehouse=${encodeURIComponent(warehouse)}`
@@ -106,7 +111,7 @@ export function WmsApp({ path }: { path: string[] }) {
     return () => {
       active = false;
     };
-  }, [detailId, friendlyError, section, subroute, t, warehouse]);
+  }, [detailId, friendlyError, isBatchLabelPreview, section, subroute, t, warehouse]);
 
   useEffect(() => {
     if (!toast) return;
@@ -152,7 +157,11 @@ export function WmsApp({ path }: { path: string[] }) {
     await commit({ type: "resetDemo" }, t("success.demoReset"));
   }
 
-  const title = t(routeTitleKeys[section] ?? "app.name");
+  const title = t(
+    section === "reports" && path[1] === "operations"
+      ? "title.operationsReport"
+      : routeTitleKeys[section] ?? "app.name",
+  );
   const demoMode = shouldShowDemoReset({
     appEnv: process.env.NEXT_PUBLIC_APP_ENV,
     demoMode: process.env.NEXT_PUBLIC_DEMO_MODE,
@@ -185,6 +194,7 @@ export function WmsApp({ path }: { path: string[] }) {
     const order = state.outboundOrders.find((row) => row.id === path[1]);
     return order ? <LabelView order={order} state={state} /> : <div className="empty">{t("common.orderNotFound")}</div>;
   }
+  if (isBatchLabelPreview) return <BatchLabelPreview />;
 
   return (
     <AppShell
@@ -203,6 +213,7 @@ export function WmsApp({ path }: { path: string[] }) {
           {section === "dashboard" && <DashboardPage warehouse={warehouse} />}
           {section === "inventory" && <InventoryPage warehouse={warehouse} />}
           {section === "reports" && path[1] === "inventory" && <InventoryReportPage warehouse={warehouse} />}
+          {section === "reports" && path[1] === "operations" && <OperationsReportPage key={warehouse} warehouse={warehouse} />}
           {section === "warehouse-map" && <WarehouseMapPage warehouse={warehouse} />}
           {section === "outbound" &&
             (path[1] ? (
@@ -244,6 +255,7 @@ function OutboundList({
   const [queue, setQueue] = useState<OutboundQueue>("To_Prepare");
   const [page, setPage] = useState(1);
   const [reloadToken, setReloadToken] = useState(0);
+  const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
   const [outboundPage, setOutboundPage] = useState<{ rows: OutboundOrder[]; total: number; totalPages: number }>({
     rows: state.outboundOrders,
     total: state.outboundOrders.length,
@@ -257,6 +269,7 @@ function OutboundList({
       .then(async (response) => {
         if (!response.ok) throw new Error(t("common.loadFailed"));
         setOutboundPage(await response.json());
+        setSelectedOrderIds([]);
       })
       .catch(() => undefined);
     return () => controller.abort();
@@ -269,6 +282,19 @@ function OutboundList({
         .toLowerCase()
         .includes(query.toLowerCase()),
   );
+  const selectedOrders = outboundPage.rows.filter((order) => selectedOrderIds.includes(order.id));
+  const selectedPickupCodes = new Set(
+    selectedOrders.map((order) => order.pickupCode ? `PICKUP:${order.pickupCode}` : `SH:${order.shNo}`),
+  ).size;
+  const selectedUnits = selectedOrders.reduce(
+    (sum, order) => sum + order.lines.reduce((lineSum, line) => lineSum + line.requiredQty, 0),
+    0,
+  );
+  const awaitingPickup = queue === "Awaiting_Pickup";
+  const toggleOrder = (orderId: string) =>
+    setSelectedOrderIds((current) =>
+      current.includes(orderId) ? current.filter((id) => id !== orderId) : [...current, orderId],
+    );
   return (
     <>
       <PageHead
@@ -284,7 +310,10 @@ function OutboundList({
           ["Outbound", t("outbound.queue.outbound")],
           ["ERP_Issues", t("outbound.queue.erpIssues")],
         ].map(([value, label]) => (
-          <button className={queue === value ? "active" : ""} key={value} onClick={() => setQueue(value as OutboundQueue)}>{label}</button>
+          <button className={queue === value ? "active" : ""} key={value} onClick={() => {
+            setSelectedOrderIds([]);
+            setQueue(value as OutboundQueue);
+          }}>{label}</button>
         ))}
       </div>
       <div className="panel">
@@ -299,9 +328,38 @@ function OutboundList({
           </div>
           <Badge tone="amber">{t("outbound.active", { count: orders.filter((row) => row.status !== "Outbound").length })}</Badge>
         </div>
+        {awaitingPickup && (
+          <div className="batch-selection-bar">
+            <Button type="button" onClick={() => setSelectedOrderIds(orders.map((order) => order.id))}>
+              {t("label.selectPage")}
+            </Button>
+            <Button type="button" onClick={() => setSelectedOrderIds(outboundPage.rows.map((order) => order.id))}>
+              {t("label.selectEligible")}
+            </Button>
+            <Button type="button" disabled={!selectedOrderIds.length} onClick={() => setSelectedOrderIds([])}>
+              {t("label.clearSelection")}
+            </Button>
+            <div className="batch-selection-summary">
+              <span>{t("label.selectedOrders")}: <strong>{selectedOrders.length}</strong></span>
+              <span>{t("label.pickupCodes")}: <strong>{selectedPickupCodes}</strong></span>
+              <span>{t("label.labelPages")}: <strong>{selectedPickupCodes}</strong></span>
+              <span>{t("label.totalUnits")}: <strong>{selectedUnits}</strong></span>
+            </div>
+            <Link
+              className={cn("btn primary", !selectedOrderIds.length && "disabled")}
+              aria-disabled={!selectedOrderIds.length}
+              href={selectedOrderIds.length
+                ? `/outbound/batch-labels/preview?orderIds=${encodeURIComponent(selectedOrderIds.join(","))}`
+                : "#"}
+            >
+              <Printer /> {t("label.generateBatch")}
+            </Link>
+          </div>
+        )}
         <div className="table-wrap outbound-queue-table">
           <table>
             <thead><tr>
+              {awaitingPickup && <th className="selection-column"><span className="sr-only">{t("common.select")}</span></th>}
               <th>SH / {t("summary.pickupCode")}</th>
               <th>{t("outbound.skuSummary")}</th>
               <th>{t("common.condition")}</th>
@@ -320,6 +378,16 @@ function OutboundList({
                 order.status === "Ready_for_Pickup" ? t("outbound.action.dispatch") : t("common.open");
               return (
                 <tr key={order.id}>
+                  {awaitingPickup && (
+                    <td className="selection-column">
+                      <input
+                        type="checkbox"
+                        aria-label={`${t("common.select")} ${order.shNo}`}
+                        checked={selectedOrderIds.includes(order.id)}
+                        onChange={() => toggleOrder(order.id)}
+                      />
+                    </td>
+                  )}
                   <td><Link className="queue-identifier mono" href={`/outbound/${order.id}`}>{order.shNo}</Link><span className="queue-secondary mono">{order.pickupCode ?? t("outbound.pickupWhenPrepared")}</span></td>
                   <td><strong>{order.lines.map((line) => line.sku).slice(0, 2).join(" · ")}</strong><span className="queue-secondary">{t("outbound.lineUnits", { lines: order.lines.length, units: required })}</span></td>
                   <td><div className="status-stack">{conditions.map((condition) => <StatusBadge code={condition} key={condition} />)}</div></td>
@@ -342,8 +410,14 @@ function OutboundList({
       </div>
       <div className="toolbar">
         <span className="subtle">{t("common.rowsPage", { rows: outboundPage.total, page, pages: outboundPage.totalPages || 1 })}</span>
-        <Button type="button" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>{t("common.previous")}</Button>
-        <Button type="button" disabled={page >= outboundPage.totalPages} onClick={() => setPage((value) => value + 1)}>{t("common.next")}</Button>
+        <Button type="button" disabled={page <= 1} onClick={() => {
+          setSelectedOrderIds([]);
+          setPage((value) => value - 1);
+        }}>{t("common.previous")}</Button>
+        <Button type="button" disabled={page >= outboundPage.totalPages} onClick={() => {
+          setSelectedOrderIds([]);
+          setPage((value) => value + 1);
+        }}>{t("common.next")}</Button>
       </div>
     </>
   );

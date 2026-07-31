@@ -21,7 +21,10 @@ export class PageQueryService {
     return {
       currentUser: user ? { displayName: user.displayName, role: user.role.name, permissions: user.role.permissions } : undefined,
       warehouses: warehouses.map((row) => ({
-        id: row.id, code: row.code, name: row.name, timezone: row.timezone, active: row.active,
+        id: row.id, code: row.code, name: row.name, timezone: row.timezone,
+        floorAreaSqm: row.floorAreaSqm ? number(row.floorAreaSqm) : undefined,
+        operationalAreaSqm: row.operationalAreaSqm ? number(row.operationalAreaSqm) : undefined,
+        active: row.active,
       })),
       locations: [], products: [], inventory: [], serials: [], outboundOrders: [], transfers: [],
       repairJobs: [], pickupBatches: [], transactions: [], audit: [], exceptions: [],

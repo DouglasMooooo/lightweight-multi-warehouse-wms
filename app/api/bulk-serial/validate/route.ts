@@ -33,14 +33,18 @@ export async function POST(request: Request) {
           const file = form.get("file");
           if (!(file instanceof File)) throw new DomainError("A serial upload file is required.", "FILE_REQUIRED");
           const mode = form.get("mode");
+          const serialNumbers = await serialsFromUpload(file);
+          const requestedQty = Number(form.get("expectedQty") ?? 0);
           return schema.parse({
             mode,
             warehouseCode: form.get("warehouseCode"),
             locationCode: form.get("locationCode") || undefined,
             sku: form.get("sku") || undefined,
-            expectedQty: form.get("expectedQty") ? Number(form.get("expectedQty")) : undefined,
+            expectedQty: mode === "NEW_INBOUND"
+              ? requestedQty > 0 ? requestedQty : serialNumbers.length
+              : undefined,
             sourceDocument: form.get("sourceDocument") || undefined,
-            serialNumbers: await serialsFromUpload(file),
+            serialNumbers,
           });
         })()
       : schema.parse(await request.json());

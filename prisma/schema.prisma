@@ -154,6 +154,8 @@ model Warehouse {
   code               String                @unique
   name               String
   timezone           String
+  floorAreaSqm       Decimal?              @db.Decimal(12, 2)
+  operationalAreaSqm Decimal?              @db.Decimal(12, 2)
   active             Boolean               @default(true)
   createdAt          DateTime              @default(now())
   updatedAt          DateTime              @updatedAt

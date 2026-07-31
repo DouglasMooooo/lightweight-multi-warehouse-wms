@@ -206,41 +206,91 @@ export class BulkOperationsService {
   async validateFaulty(input: { warehouseCode: string; locationCode?: string; serialNumbers: string[] }) {
     const serialNumbers = normalizeSerialBatch(input.serialNumbers);
     const unique = [...new Set(serialNumbers)];
-    const existing = await this.prisma.serialNumber.findMany({
-      where: { serialNumber: { in: unique } },
-      include: {
-        product: true,
-        repairReturns: { where: { active: true }, select: { id: true } },
-      },
-    });
+    const [warehouse, existing] = await Promise.all([
+      this.prisma.warehouse.findUnique({ where: { code: input.warehouseCode }, select: { id: true, code: true } }),
+      this.prisma.serialNumber.findMany({
+        where: { serialNumber: { in: unique } },
+        include: {
+          product: true,
+          currentWarehouse: { select: { code: true } },
+          repairReturns: { where: { active: true }, select: { id: true } },
+        },
+      }),
+    ]);
+    if (!warehouse) throw new DomainError("Warehouse does not exist.", "INVALID_WAREHOUSE");
     const existingBySn = new Map(existing.map((row) => [row.serialNumber, row]));
+    const outboundHistory = existing.length
+      ? await this.prisma.outboundAllocation.findMany({
+          where: { serialNumberId: { in: existing.map((row) => row.id) }, dispatchedAt: { not: null } },
+          select: {
+            serialNumberId: true,
+            dispatchedAt: true,
+            outboundOrderLine: { select: { outboundOrder: { select: { shNo: true } } } },
+          },
+          orderBy: { dispatchedAt: "desc" },
+        })
+      : [];
+    const shBySerialId = new Map<string, string>();
+    for (const allocation of outboundHistory) {
+      if (!shBySerialId.has(allocation.serialNumberId!))
+        shBySerialId.set(allocation.serialNumberId!, allocation.outboundOrderLine.outboundOrder.shNo);
+    }
+    const erpBySn = new Map<string, Awaited<ReturnType<ERPAdapter["findBySerialNumber"]>>>();
+    const erpFailures = new Set<string>();
+    await Promise.all(unique.map(async (serialNumber) => {
+      const current = existingBySn.get(serialNumber);
+      const knownSh =
+        shBySerialId.get(current?.id ?? "") ??
+        (current?.sourceDocument?.startsWith("SH-") ? current.sourceDocument : undefined);
+      if (current?.product.sku && knownSh) return;
+      try {
+        erpBySn.set(serialNumber, await this.erp.findBySerialNumber(serialNumber));
+      } catch {
+        erpFailures.add(serialNumber);
+        erpBySn.set(serialNumber, null);
+      }
+    }));
     const seen = new Set<string>();
     const results = [];
     for (const serialNumber of serialNumbers) {
       const duplicateInBatch = seen.has(serialNumber);
       seen.add(serialNumber);
       const current = existingBySn.get(serialNumber);
-      const erp = await this.erp.findBySerialNumber(serialNumber);
+      const erp = erpBySn.get(serialNumber) ?? null;
       const resolvedSku = erp?.sku ?? current?.product.sku;
+      const resolvedShNo =
+        erp?.relatedShNo ??
+        shBySerialId.get(current?.id ?? "") ??
+        (current?.sourceDocument?.startsWith("SH-") ? current.sourceDocument : undefined);
       const decision = classifyFaultyReceipt({
         duplicateInBatch,
         existingStatus: current?.status,
         activeRepairReturn: Boolean(current?.repairReturns.length),
         existingSku: current?.product.sku,
         resolvedSku,
+        resolvedShNo,
         erpFound: Boolean(erp),
+        erpLookupFailed: erpFailures.has(serialNumber),
         existsInWms: Boolean(current),
+        wrongWarehouse: Boolean(
+          current?.currentWarehouse?.code &&
+          current.currentWarehouse.code !== warehouse.code,
+        ),
       });
       results.push({
         serialNumber,
         valid: decision.valid,
         code: decision.code,
         erpFound: Boolean(erp),
-        shNo: erp?.relatedShNo,
+        shNo: resolvedShNo,
         sku: resolvedSku,
         model: erp?.model ?? current?.product.model,
         existingStatus: current?.status,
+        previousStatus: current?.status ?? "Not registered",
+        returnStatus: "Repair",
         destination: input.locationCode || "REPAIR-01",
+        repairLocation: input.locationCode || "REPAIR-01",
+        validationResult: decision.code,
       });
     }
     return {
@@ -268,8 +318,8 @@ export class BulkOperationsService {
     return this.prisma.$transaction(async (tx) => {
       const validationService = new BulkOperationsService(tx as unknown as PrismaClient, this.erp);
       const validation = await validationService.validateFaulty(input);
-      const selected = validation.results.filter((row) => accepted.has(row.serialNumber));
-      if (selected.length !== accepted.size || selected.some((row) => !row.valid || !row.sku))
+      const selected = validation.results.filter((row) => accepted.has(row.serialNumber) && row.valid);
+      if (selected.length !== accepted.size || selected.some((row) => !row.sku))
         throw new DomainError("Selected faulty rows changed or require Manual Review.", "FAULTY_BATCH_REVALIDATION_FAILED");
       const [who, warehouse] = await Promise.all([
         actor(tx),
@@ -282,8 +332,27 @@ export class BulkOperationsService {
         throw new DomainError("Faulty receiving requires a Repair/service location.", "INVALID_REPAIR_LOCATION");
       const reference = batchReference(warehouse.code);
       const inventory = new InventoryRepository(tx);
+      const products = await tx.product.findMany({
+        where: { sku: { in: [...new Set(selected.map((row) => row.sku!))] } },
+      });
+      const productBySku = new Map(products.map((product) => [product.sku, product]));
+      if (products.length !== new Set(selected.map((row) => row.sku)).size)
+        throw new DomainError("One or more resolved SKUs no longer exist.", "SKU_NOT_FOUND");
+      const quantityByProduct = new Map<string, number>();
+      for (const row of selected)
+        quantityByProduct.set(row.sku!, (quantityByProduct.get(row.sku!) ?? 0) + 1);
+      for (const [sku, quantity] of quantityByProduct) {
+        const product = productBySku.get(sku)!;
+        await inventory.applyDelta({
+          warehouseId: warehouse.id,
+          locationId: location.id,
+          productId: product.id,
+          itemType: product.itemType,
+          condition: "Repair",
+        }, { physicalDelta: quantity });
+      }
       for (const row of selected) {
-        const product = await tx.product.findUniqueOrThrow({ where: { sku: row.sku! } });
+        const product = productBySku.get(row.sku!)!;
         const existing = await tx.serialNumber.findUnique({ where: { serialNumber: row.serialNumber } });
         const serial = existing
           ? await tx.serialNumber.update({
@@ -293,13 +362,6 @@ export class BulkOperationsService {
           : await tx.serialNumber.create({
               data: { serialNumber: row.serialNumber, productId: product.id, currentWarehouseId: warehouse.id, currentLocationId: location.id, condition: "Repair", status: "Repair", sourceDocument: row.shNo || reference },
             });
-        await inventory.applyDelta({
-          warehouseId: warehouse.id,
-          locationId: location.id,
-          productId: product.id,
-          itemType: product.itemType,
-          condition: "Repair",
-        }, { physicalDelta: 1 });
         const repairJob = await tx.repairJob.create({
           data: {
             serialNumberId: serial.id, warehouseId: warehouse.id, productId: product.id,

@@ -17,6 +17,49 @@ export interface ReportingMovement {
   effectiveAt: string;
 }
 
+export interface OperationalKpiInput {
+  openingPhysical?: number;
+  closingPhysical?: number;
+  outboundQty: number;
+  periodDays: number;
+  floorAreaSqm?: number;
+}
+
+export function calculateOperationalKpis(input: OperationalKpiInput) {
+  const historyAvailable =
+    input.openingPhysical !== undefined &&
+    input.closingPhysical !== undefined;
+  const averagePhysical = historyAvailable
+    ? (input.openingPhysical! + input.closingPhysical!) / 2
+    : undefined;
+  const operationalTurnover =
+    averagePhysical !== undefined && averagePhysical > 0
+      ? input.outboundQty / averagePhysical
+      : undefined;
+  const inventoryDays =
+    averagePhysical !== undefined &&
+    input.outboundQty > 0 &&
+    input.periodDays > 0
+      ? averagePhysical / (input.outboundQty / input.periodDays)
+      : undefined;
+  const outboundDensity =
+    input.floorAreaSqm && input.floorAreaSqm > 0
+      ? input.outboundQty / input.floorAreaSqm
+      : undefined;
+  const inventoryDensity =
+    input.floorAreaSqm && input.floorAreaSqm > 0 && averagePhysical !== undefined
+      ? averagePhysical / input.floorAreaSqm
+      : undefined;
+  return {
+    averagePhysical,
+    operationalTurnover,
+    inventoryDays,
+    outboundDensity,
+    inventoryDensity,
+    areaConfigured: Boolean(input.floorAreaSqm && input.floorAreaSqm > 0),
+  };
+}
+
 const inPeriod = (value: string | undefined, from: Date, to: Date) => {
   if (!value) return false;
   const at = new Date(value);
@@ -63,6 +106,10 @@ export function operationalMovementMetrics(
   const sum = (predicate: (row: ReportingMovement) => boolean) =>
     period.filter(predicate).reduce((total, row) => total + row.quantity, 0);
   return {
+    inboundQty: sum((row) => row.transactionType === "Inbound"),
+    outboundQty: sum((row) => row.transactionType === "Outbound"),
+    transferIn: sum((row) => row.transactionType === "Transfer_In"),
+    transferOut: sum((row) => row.transactionType === "Transfer_Out"),
     newInbound: sum((row) => row.transactionType === "Inbound" && row.condition === "New"),
     newOutbound: sum((row) => row.transactionType === "Outbound" && row.condition === "New"),
     repairGoodInbound: sum(

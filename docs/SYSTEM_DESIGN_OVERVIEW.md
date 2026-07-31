@@ -369,3 +369,33 @@ Future production requires SSO (for example Microsoft Entra ID), RBAC enforcemen
 9. Prevent duplicate Opening entries and activate production only after sign-off.
 
 No platform or microservice migration is recommended without measured performance, security or organisational evidence.
+
+## System Automation
+
+The Preview automates repeatable data work where the system has authoritative evidence:
+
+- ERP replacement orders create WMS preparation demand through `ERPAdapter`.
+- Multi-order label preview reloads authoritative outbound lines, groups by Pickup Code (or SH fallback), aggregates only identical SKU + Model + ERP Warehouse rows, and remains read-only.
+- Scanner, paste and CSV/XLSX inputs normalize SN values and perform set-based WMS lookups.
+- Faulty receiving resolves WMS identity, original dispatched SH, SKU and model before using ERP fallback. Unresolved or conflicting rows remain controlled exceptions.
+- Batch validation separates normal rows from exceptions before human confirmation writes inventory.
+- Confirmed workflows control state transitions, ledger entries, serial lifecycle and audit evidence.
+- Source and destination teams use one Transfer ID from creation through In Transit and receipt.
+- Confirmed dispatch creates an ERP sync job after the warehouse transaction commits.
+- Weekly/monthly reports use one shared Physical, Frozen, Available and In Transit definition across warehouses.
+- Business-event names such as `PREPARATION_COMPLETED`, `TRANSFER_RECEIVED` and `ERP_SYNC_FAILED` define the future notification boundary. External delivery is not claimed in this Preview.
+
+## Human Control
+
+Automation does not replace confirmation of physical reality. Operators or supervisors retain control of:
+
+- actual physical receipt;
+- physical stock picking;
+- staging or dispatch location confirmation;
+- unresolved SN, SKU, SH and warehouse exceptions;
+- damaged or incorrect goods judgement;
+- final transfer receipt confirmation;
+- final dispatch confirmation; and
+- exceptional stock-adjustment approval.
+
+Expected ERP or Supply Chain data is matching evidence, not proof that goods arrived. Printing or exporting a label never changes inventory.

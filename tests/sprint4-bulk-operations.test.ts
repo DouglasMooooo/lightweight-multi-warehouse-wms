@@ -38,12 +38,12 @@ describe("Sprint 4 bulk New inbound", () => {
 
 describe("Sprint 4 faulty batch classification", () => {
   it.each([
-    [{ existsInWms: true, erpFound: true, resolvedSku: "SKU-A" }, "VALID"],
-    [{ existsInWms: false, erpFound: true, resolvedSku: "SKU-A" }, "UNKNOWN_SN_CAN_REGISTER"],
-    [{ existsInWms: false, erpFound: false }, "ERP_NOT_FOUND"],
-    [{ existsInWms: true, erpFound: true, resolvedSku: "SKU-A", existingStatus: "Repair" }, "ALREADY_IN_REPAIR"],
+    [{ existsInWms: true, erpFound: true, resolvedSku: "SKU-A", resolvedShNo: "SH-1" }, "VALID"],
+    [{ existsInWms: false, erpFound: true, resolvedSku: "SKU-A", resolvedShNo: "SH-1" }, "VALID"],
+    [{ existsInWms: false, erpFound: false }, "UNKNOWN_SN"],
+    [{ existsInWms: true, erpFound: true, resolvedSku: "SKU-A", resolvedShNo: "SH-1", existingStatus: "Repair" }, "ALREADY_RECEIVED"],
     [{ existsInWms: true, erpFound: true, resolvedSku: "SKU-A", existingStatus: "In_Stock" }, "MANUAL_REVIEW"],
-    [{ existsInWms: true, erpFound: true, resolvedSku: "SKU-A", activeRepairReturn: true }, "DUPLICATE_RETURN"],
+    [{ existsInWms: true, erpFound: true, resolvedSku: "SKU-A", activeRepairReturn: true }, "ALREADY_RECEIVED"],
     [{ existsInWms: true, erpFound: true, resolvedSku: "SKU-B", existingSku: "SKU-A" }, "SKU_MISMATCH"],
   ])("classifies each submitted row independently", (change, expected) => {
     expect(classifyFaultyReceipt(Object.assign({
