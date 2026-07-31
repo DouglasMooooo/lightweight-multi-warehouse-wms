@@ -22,7 +22,7 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { Warehouse as WarehouseRecord, WarehouseCode } from "@/domain/types";
 import type { TranslationKey } from "@/i18n/config";
 import { useI18n } from "@/i18n/provider";
@@ -77,6 +77,23 @@ const nav: Array<{
     ],
   },
 ];
+
+function WarehouseClock({ locale, timeZone }: { locale: "en" | "zh-CN"; timeZone: string }) {
+  const [now, setNow] = useState<Date | null>(null);
+
+  useEffect(() => {
+    const update = () => setNow(new Date());
+    update();
+    const interval = window.setInterval(update, 60_000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  return (
+    <div className="topbar-date">
+      {now ? formatWarehouseDateTime(now, locale, timeZone) : "—"} · {timeZone}
+    </div>
+  );
+}
 
 export function AppShell({
   path,
@@ -147,7 +164,7 @@ export function AppShell({
         <header className="topbar">
           <div className="topbar-left">
             <Button className="ghost mobile-menu" onClick={() => setSidebarOpen(true)} aria-label={t("common.openNavigation")}><Menu /></Button>
-            <div><h1>{title}</h1><div className="topbar-date">{formatWarehouseDateTime(new Date(), locale, timeZone)} · {timeZone}</div></div>
+            <div><h1>{title}</h1><WarehouseClock locale={locale} timeZone={timeZone} /></div>
             {showDemoReset && <Badge tone="teal">DEMO</Badge>}
           </div>
           <div className="topbar-actions">
