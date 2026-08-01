@@ -2,7 +2,7 @@
 
 > 演示定位：Working Prototype + Target-State Validation + ICT Business Process Optimisation Showcase  
 > 建议时长：8–10 分钟  
-> 演示环境：[SYD WMS Preview](https://syd-wms-preview-r9vrsscrh-douglas-mos-projects.vercel.app/)  
+> 演示环境：[SYD WMS Preview](https://syd-wms-preview-ddmdmcgc3-douglas-mos-projects.vercel.app/)
 > 演示结论：**READY WITH LIMITATIONS**  
 > 重要说明：这是仓库运营流程原型，不是已完成的生产 ERP 替代系统。
 
@@ -73,7 +73,8 @@
 - 维修队列：2
 - 调拨途中：0
 - 异常处理：0
-- 可用库存：291
+- 可出库良品库存：295
+- 帮助文字：新品 + 维修良品 − 已冻结
 
 **我说：**
 
@@ -177,7 +178,8 @@
 ## 3:50–4:40 — Transfer：取消第二遍重复扫描
 
 **页面**：Transfers  
-**点击动作**：展示页面和目标流程。没有批准的演示 Fixture 时，不创建调拨。
+**点击动作**：打开 `DEMO-TRANSFER-001`，选择 New，粘贴四个
+`DEMO-TRANSFER-*` 专用 SN 并重新校验；默认不点击确认调拨出库。
 
 **我说：**
 
@@ -190,7 +192,8 @@
 > 提高效率不是让第二次扫描更快，而是取消第二次重复扫描。
 
 **业务价值**：100 台设备的调拨，从约 200 次扫描降到不超过 100 次初始采集。  
-**演示限制**：当前没有批准的安全 Transfer 数据，必须明确说 `DEMO DATA REQUIRED`。  
+**演示状态**：4 个专用 SN 应显示 4 有效、0 需处理、0 未解析，并按两个
+Product 分组。现场若要确认必须单独说明，并只使用该专用 Demo 库存。
 **下一页过渡**：
 
 > 调拨解决仓库之间的移动，新采购收货则从 Expected Data 开始。
@@ -224,11 +227,11 @@
 
 **Product 汇总应显示**：
 
-- Physical：310
-- Available：293
+- Physical：314
+- 物理可用库存：297
 - Frozen：17
 - In Transit：0
-- New：202
+- New：206
 - Repair Good：106
 - Repair：2
 
@@ -334,14 +337,16 @@
 
 ## 4. Stakeholder 可能提问：标准回答
 
-### 为什么 Dashboard 可用库存是 291，产品库存报表是 293？
+### 为什么 Dashboard 可出库良品库存和产品报表物理可用库存不同？
 
-> Dashboard 的 291 是可分配产品库存，只包括 New 和 Repair_Good，再减去 Frozen。产品报表的 293 是所有 Product Physical 减 Frozen，里面还包括 2 台 Repair。数据没有丢失，但两个指标现在都叫“可用”，展示标签需要进一步明确。
+> Dashboard 的 295 是可出库良品库存，只包括 New 和 Repair_Good，再减去
+> Frozen。产品报表的 297 是 Product Physical 减 Frozen，其中还包括 2 台
+> Repair。两个指标已经使用不同标签和帮助文字，数据没有丢失。
 
-建议未来标签：
+当前标签：
 
-- Dashboard：`可出库产品库存（新品 + 维修良品）`
-- Inventory Report：`物理可用库存（实物 − 冻结）`
+- Dashboard：`可出库良品库存`，帮助文字为 `新品 + 维修良品 − 已冻结`
+- Inventory Report：`物理可用库存`，帮助文字为 `产品实物库存 − 已冻结`
 
 ### 为什么 Warehouse Map 是 2323，产品报表只有 310？
 
@@ -373,14 +378,11 @@
 
 | 等级 | 限制 | 现场处理方式 |
 |---|---|---|
-| P0 | Dashboard 和 Operations Report 的异常计数尚未按仓库过滤 | 不把当前 0 描述为已验证的多仓异常总数 |
-| P0 | 历史条件库存使用当前余额，不能代表历史期末状态 | 历史期只展示可重建指标；条件拆分说明仍需完善 |
-| P0 | Dashboard 291 与 Inventory 293 使用相似“可用”标签 | 使用本指南中的口径解释 |
-| P1 | Map 默认全品类，Inventory 默认 Product | 明确说明筛选范围 |
-| P1 | 没有批准的 Transfer Demo Fixture | 只演示目标流程，不创建真实调拨 |
-| P1 | KPI 不可用原因显示不够具体 | 口头说明历史基线或仓库面积缺失 |
-| P1 | Faulty 页面出现 `status.Not registered` | 说明为翻译缺口，不是业务校验失败 |
-| P2 | 部分 `New`、`Pending`、`Qty`、`Unmapped` 尚未中文化 | 不翻译领域代码和品牌；UI 文案后续补齐 |
+| P1 | 当前 ERP 是 `MockERPAdapter`，不是真实 Kingdee | 明确说明 Adapter 边界，不声称真实 Kingdee 已连接 |
+| P1 | 尚未完成生产权限、备份恢复和监控验收 | 结论保持 `READY WITH LIMITATIONS`，不能称 Production Ready |
+| P2 | 历史期初 Ledger 基线不足 | 展示系统给出的具体不可用原因，不提供猜测 KPI |
+| P2 | 仓库面积未配置 | 展示面积 KPI 的具体不可用原因 |
+| P2 | 非零多仓异常视觉样例依赖获批测试数据 | 当前仓库过滤逻辑由自动化测试覆盖 |
 | P3 | New Inbound 尚未自动接入完整 Expected Dataset | 明确区分当前能力与目标状态 |
 
 ---
@@ -404,18 +406,18 @@
 
 若 Preview 网络不稳定，可使用以下截图继续讲解：
 
-1. [Dashboard](../artifacts/demo-rehearsal-zh/01-dashboard-zh.png)
-2. [Outbound Queue](../artifacts/demo-rehearsal-zh/02-outbound-queue-zh.png)
-3. [Outbound SN Review](../artifacts/demo-rehearsal-zh/03-outbound-sn-review-zh.png)
-4. [Batch Label Selection](../artifacts/demo-rehearsal-zh/04-batch-label-selection-zh.png)
-5. [Batch Label Preview](../artifacts/demo-rehearsal-zh/05-batch-label-preview-zh.png)
-6. [Faulty Receiving Review](../artifacts/demo-rehearsal-zh/06-faulty-receiving-review-zh.png)
-7. [Transfer Review](../artifacts/demo-rehearsal-zh/07-transfer-review-zh.png)
-8. [Inventory Report](../artifacts/demo-rehearsal-zh/08-inventory-report-zh.png)
-9. [Operations Report](../artifacts/demo-rehearsal-zh/09-operations-report-zh.png)
-10. [Warehouse Floor](../artifacts/demo-rehearsal-zh/10-warehouse-map-floor-zh.png)
-11. [Warehouse Location Detail](../artifacts/demo-rehearsal-zh/11-warehouse-location-detail-zh.png)
-12. [ERP Boundary](../artifacts/demo-rehearsal-zh/12-erp-boundary-zh.png)
+1. [Dashboard](../artifacts/demo-rehearsal-zh-final-current-url/01-dashboard.png)
+2. [Outbound Queue](../artifacts/demo-rehearsal-zh-final-current-url/02-outbound.png)
+3. [Outbound SN Review](../artifacts/demo-rehearsal-zh-final-current-url/03-sn-review.png)
+4. [Batch Label Selection](../artifacts/demo-rehearsal-zh-final-current-url/04-batch-label-selection.png)
+5. [Batch Label Preview](../artifacts/demo-rehearsal-zh-final-current-url/05-batch-label-preview.png)
+6. [Faulty Receiving Review](../artifacts/demo-rehearsal-zh-final-current-url/06-faulty-review.png)
+7. [Transfer Review](../artifacts/demo-rehearsal-zh-final-current-url/07-transfer.png)
+8. [Inventory Report](../artifacts/demo-rehearsal-zh-final-current-url/08-inventory-report.png)
+9. [Operations Report](../artifacts/demo-rehearsal-zh-final-current-url/09-operations-report.png)
+10. [Warehouse Floor](../artifacts/demo-rehearsal-zh-final-current-url/10-warehouse-map.png)
+11. [Warehouse Location Detail](../artifacts/demo-rehearsal-zh-final-current-url/11-location-detail.png)
+12. [ERP Boundary](../artifacts/demo-rehearsal-zh-final-current-url/12-erp-boundary.png)
 
 ---
 
@@ -433,4 +435,3 @@
 | 6:25 | Operations | 缺少前提时不生成无法审计的 KPI |
 | 7:15 | Warehouse Map | 搜索结果在真实空间中高亮，而不是替换成卡片列表 |
 | 8:15 | ERP | 物理事实先落账；ERP 失败进入可重试异常，不静默回滚 |
-
