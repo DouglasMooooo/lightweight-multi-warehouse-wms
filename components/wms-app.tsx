@@ -4,7 +4,6 @@ import {
   ArrowLeft,
   ArrowRight,
   Move,
-  PackageCheck,
   PackageOpen,
   Plus,
   Printer,
@@ -36,7 +35,7 @@ import { InventoryReportPage } from "@/components/reports/inventory-report-page"
 import { OperationsReportPage } from "@/components/reports/operations-report-page";
 import { AppShell } from "@/components/layout/app-shell";
 import { ERPImportPanel } from "@/components/outbound/erp-import-panel";
-import { OutboundBatchScanner } from "@/components/outbound/outbound-batch-scanner";
+import { OutboundPreparationWorkspace } from "@/components/outbound/outbound-preparation-workspace";
 import { BatchLabelPreview } from "@/components/outbound/batch-label-preview";
 import { Badge, StatusBadge } from "@/components/shared/status-badge";
 import { WarehouseMapPage } from "@/components/warehouse-map/warehouse-map-page";
@@ -46,12 +45,7 @@ import { Button, cn, EmptyState as Empty, PageHeader as PageHead } from "@/compo
 import { useI18n } from "@/i18n/provider";
 import { translateAuditOperation } from "@/i18n/config";
 import { shouldShowDemoReset } from "@/lib/environment";
-import {
-  beginScanSubmission,
-  completeScanSubmission,
-  restoreScannerFocus,
-  type ScannerState,
-} from "@/lib/scanner";
+import { restoreScannerFocus } from "@/lib/scanner";
 import { formatWarehouseDateTime } from "@/lib/warehouse-time";
 import { outboundOperatorStage, outboundQueueFor, outboundSerialMode, type OutboundQueue } from "@/domain/outbound-presentation";
 
@@ -374,10 +368,8 @@ function OutboundList({
               const prepared = order.lines.reduce((sum, row) => sum + row.preparedQty, 0);
               const conditions = [...new Set(order.lines.map((line) => line.requiredCondition))];
               const nextAction =
-                ["Imported", "Pending_Allocation"].includes(order.status) ? t("outbound.action.allocate") :
-                order.status === "Allocated" ? t("outbound.action.prepare") :
-                order.status === "Partially_Prepared" ? t("outbound.action.prepare") :
-                order.status === "Prepared" ? t("outbound.action.completeSn") :
+                ["Imported", "Pending_Allocation", "Allocated", "Partially_Prepared"].includes(order.status) ? t("outbound.action.confirmPreparation") :
+                order.status === "Prepared" ? t("outbound.action.reviewLegacyException") :
                 order.status === "Ready_for_Pickup" ? t("outbound.action.dispatch") : t("common.open");
               return (
                 <tr key={order.id}>
@@ -438,33 +430,9 @@ function OutboundDetail({
   commit: (command: WmsCommand, success: string) => Promise<boolean>;
   refresh: () => Promise<void>;
 }) {
-  const { t, error: friendlyError } = useI18n();
+  const { t } = useI18n();
   const order = state.outboundOrders.find((row) => row.id === orderId);
   const [activeLineId, setActiveLineId] = useState(order?.lines.at(0)?.id ?? "");
-  const [scanner, setScanner] = useState<ScannerState>({ value: "", inFlight: false });
-  const [serialBatch, setSerialBatch] = useState<string[]>([]);
-  const [pasteList, setPasteList] = useState("");
-  const [batchBusy, setBatchBusy] = useState(false);
-  const [registerUnknown, setRegisterUnknown] = useState<string[]>([]);
-  const [batchValidation, setBatchValidation] = useState<{
-    summary: { total: number; valid: number; invalid: number };
-    results: Array<{
-      serialNumber: string;
-      valid: boolean;
-      code: string;
-      message: string;
-      sku?: string;
-      location?: string;
-      condition?: string;
-      status?: string;
-      canRegisterAndAssign?: boolean;
-    }>;
-  }>();
-  const scannerRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (order?.lines.length && !order.lines.some((row) => row.id === activeLineId))
-      setActiveLineId(order.lines.at(0)!.id);
-  }, [activeLineId, order]);
   const line = order?.lines.find((row) => row.id === activeLineId) ?? order?.lines.at(0);
   if (!order || !line) return <Empty label={t("common.orderNotFound")} />;
   const candidates = state.inventory.filter(
@@ -475,8 +443,6 @@ function OutboundDetail({
       row.availableQty > 0,
   );
   const serialRequired = state.products.find((row) => row.sku === line.sku)?.serialTrackingRequired;
-  const activeOrderId = order.id;
-  const activeOrderShNo = order.shNo;
   const canDispatch =
     order.status === "Ready_for_Pickup" &&
     order.lines.every((candidate) => {
@@ -484,138 +450,30 @@ function OutboundDetail({
       return candidate.preparedQty === candidate.requiredQty &&
         (!requiresSerial || candidate.scannedSerials.length === candidate.requiredQty);
     });
-  const canPrepare = line.allocatedQty > line.preparedQty && order.status !== "Outbound";
   const allPrepared = order.lines.every((candidate) => candidate.preparedQty >= candidate.requiredQty);
   const allSerialsComplete = order.lines.every((candidate) => {
     const requiresSerial = state.products.find((row) => row.sku === candidate.sku)?.serialTrackingRequired;
     return !requiresSerial || candidate.scannedSerials.length === candidate.requiredQty;
   });
   const serialMode = outboundSerialMode(order.status, allPrepared, allSerialsComplete);
+  const canUseAtomicPreparation =
+    ["Imported", "Pending_Allocation", "Partially_Prepared", "Allocated"].includes(order.status) &&
+    line.allocatedQty === 0 &&
+    line.preparedQty === 0 &&
+    line.allocations.length === 0;
+  const selectedLineComplete =
+    line.allocatedQty === line.requiredQty &&
+    line.preparedQty === line.requiredQty &&
+    (!serialRequired || line.scannedSerials.length === line.requiredQty);
   const dispatched = ["Outbound", "ERP_Synced"].includes(order.status);
   const readyForPickup = order.status === "Ready_for_Pickup" || dispatched;
   const workflow = [
     { key: "outbound.step.erpImported", complete: true },
-    { key: "outbound.step.toPrepare", complete: allPrepared },
-    { key: "outbound.step.preparationComplete", complete: allPrepared && allSerialsComplete },
+    { key: "outbound.step.toPrepare", complete: allPrepared && allSerialsComplete },
     { key: "outbound.step.awaitingPickup", complete: readyForPickup },
     { key: "outbound.step.outbound", complete: dispatched },
   ];
   const currentWorkflowIndex = workflow.findIndex((stage) => !stage.complete);
-
-  async function scanSerial(event: FormEvent) {
-    event.preventDefault();
-    const started = beginScanSubmission(scanner);
-    if (!started.accepted) {
-      setScanner(
-        started.state.feedback?.message === "DUPLICATE_SCAN"
-          ? { ...started.state, feedback: { tone: "error", message: t("scanner.duplicate") } }
-          : started.state,
-      );
-      restoreScannerFocus(scannerRef.current);
-      return;
-    }
-    const duplicate = serialBatch.includes(started.value);
-    if (!duplicate) setSerialBatch((current) => [...current, started.value]);
-    setBatchValidation(undefined);
-    setScanner(
-      completeScanSubmission(started.state, {
-        accepted: !duplicate,
-        message: duplicate
-          ? t("scanner.duplicate")
-          : `${t("scanner.accepted")}: ${started.value} · ${activeOrderShNo}`,
-      }),
-    );
-    window.setTimeout(() => restoreScannerFocus(scannerRef.current), 0);
-  }
-
-  function addPastedSerials() {
-    const values = pasteList
-      .split(/[\r\n,\t;]+/)
-      .map((value) => value.trim().toUpperCase())
-      .filter(Boolean);
-    setSerialBatch((current) => [...new Set([...current, ...values])]);
-    setPasteList("");
-    setBatchValidation(undefined);
-    window.setTimeout(() => restoreScannerFocus(scannerRef.current), 0);
-  }
-
-  async function validateBatch(serialNumbers = serialBatch) {
-    if (!serialNumbers.length) return;
-    setBatchBusy(true);
-    try {
-      const response = await fetch(`/api/outbound/${activeOrderId}/serials/validate`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ lineId: activeLineId, serialNumbers }),
-      });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error ?? "Bulk validation failed.");
-      setSerialBatch(serialNumbers);
-      setBatchValidation(body);
-      setRegisterUnknown([]);
-    } catch (error) {
-      setScanner((current) => ({
-        ...current,
-        feedback: { tone: "error", message: error instanceof Error ? error.message : "Bulk validation failed." },
-      }));
-    } finally {
-      setBatchBusy(false);
-    }
-  }
-
-  async function uploadSerialFile(file?: File) {
-    if (!file) return;
-    const form = new FormData();
-    form.set("lineId", activeLineId);
-    form.set("file", file);
-    setBatchBusy(true);
-    try {
-      const response = await fetch(`/api/outbound/${activeOrderId}/serials/validate`, { method: "POST", body: form });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error ?? "Serial upload failed.");
-      setSerialBatch(body.results.map((row: { serialNumber: string }) => row.serialNumber));
-      setBatchValidation(body);
-      setRegisterUnknown([]);
-    } catch (error) {
-      setScanner((current) => ({
-        ...current,
-        feedback: { tone: "error", message: error instanceof Error ? error.message : "Serial upload failed." },
-      }));
-    } finally {
-      setBatchBusy(false);
-    }
-  }
-
-  async function confirmValidBatch() {
-    const valid = batchValidation?.results.filter((row) => row.valid).map((row) => row.serialNumber) ?? [];
-    const submitted = [...new Set([...valid, ...registerUnknown])];
-    if (!submitted.length) return;
-    setBatchBusy(true);
-    try {
-      const response = await fetch(`/api/outbound/${activeOrderId}/serials/commit`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          lineId: activeLineId,
-          serialNumbers: submitted,
-          registerUnknownSerials: registerUnknown,
-        }),
-      });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error ?? "Batch confirmation failed.");
-      await refresh();
-      setSerialBatch([]);
-      setRegisterUnknown([]);
-      setBatchValidation(undefined);
-      setBatchBusy(false);
-    } catch (error) {
-      setScanner((current) => ({
-        ...current,
-        feedback: { tone: "error", message: error instanceof Error ? error.message : "Batch confirmation failed." },
-      }));
-      setBatchBusy(false);
-    }
-  }
 
   return (
     <>
@@ -645,22 +503,6 @@ function OutboundDetail({
             >
               <Truck /> {t("outbound.confirmDispatch")}
             </Button>
-            <Button
-              disabled={!canPrepare}
-              onClick={() =>
-                commit(
-                  {
-                    type: "prepareOutbound",
-                    orderId: order.id,
-                    lineId: line.id,
-                    allocationIds: line.allocations.filter((row) => !row.preparedAt).map((row) => row.id),
-                  },
-                  t("success.outboundPrepared", { sh: order.shNo }),
-                )
-              }
-            >
-              <PackageCheck /> {t("outbound.confirmPrepared")}
-            </Button>
           </>
         }
       />
@@ -671,9 +513,6 @@ function OutboundDetail({
           </div>
         ))}
       </div>
-      {serialMode === "CAPTURE" && (
-        <OutboundBatchScanner order={order} onCommitted={refresh} />
-      )}
       {serialMode === "READ_ONLY" && order.status === "Ready_for_Pickup" && (
         <div className="panel">
           <div className="panel-head">
@@ -731,11 +570,7 @@ function OutboundDetail({
                     <tr
                       key={candidate.id}
                       className={candidate.id === line.id ? "selected-row" : ""}
-                      onClick={() => {
-                        setActiveLineId(candidate.id);
-                        setSerialBatch([]);
-                        setBatchValidation(undefined);
-                      }}
+                      onClick={() => setActiveLineId(candidate.id)}
                     >
                       <td className="mono strong">{candidate.sku}</td>
                       <td>{candidate.model}</td>
@@ -750,167 +585,33 @@ function OutboundDetail({
               </table>
             </div>
           </div>
-          {line.allocatedQty < line.requiredQty && (
+          {canUseAtomicPreparation && (
+            <OutboundPreparationWorkspace
+              order={order}
+              line={line}
+              candidates={candidates}
+              serialTrackingRequired={Boolean(serialRequired)}
+              onConfirmed={refresh}
+            />
+          )}
+          {selectedLineComplete && !["Ready_for_Pickup", "Outbound", "ERP_Synced"].includes(order.status) && (
             <div className="panel">
               <div className="panel-head">
-                <h3>{t("outbound.eligibleInventory")}</h3>
-                <span className="subtle">{t("common.onlyMatchingCondition")}</span>
+                <div>
+                  <h3>{t("outbound.linePreparationCompleted")}</h3>
+                  <span className="subtle">{t("outbound.linePreparationCompletedHelp")}</span>
+                </div>
+                <PackageOpen />
               </div>
-              <div className="panel-body grid">
-                {candidates.map((row) => (
-                  <div className="allocation-card" key={row.id}>
-                    <div className="strong">{row.locationCode}</div>
-                    <div className="subtle">
-                      {row.model} · {t(`status.${row.condition}`)}
-                    </div>
-                    <div className="allocation-meta">
-                      <div>
-                        <span>{t("common.physical")}</span>
-                        <strong>{row.physicalQty}</strong>
-                      </div>
-                      <div>
-                        <span>{t("common.frozen")}</span>
-                        <strong>{row.frozenQty}</strong>
-                      </div>
-                      <div>
-                        <span>{t("common.available")}</span>
-                        <strong>{row.availableQty}</strong>
-                      </div>
-                    </div>
-                    <Button
-                      className="primary"
-                      onClick={() =>
-                        commit(
-                          {
-                            type: "allocateOutbound",
-                            orderId: order.id,
-                            lineId: line.id,
-                            locationCode: row.locationCode,
-                            qty: Math.min(row.availableQty, line.requiredQty - line.allocatedQty),
-                          },
-                          t("success.outboundAllocated", {
-                            count: Math.min(row.availableQty, line.requiredQty - line.allocatedQty),
-                            location: row.locationCode,
-                          }),
-                        )
-                      }
-                    >
-                      <PackageCheck /> {t("common.allocate")}
-                    </Button>
-                  </div>
-                ))}
-                {!candidates.length && <Empty label={t("outbound.noEligible")} />}
+              <div className="panel-body summary-list">
+                <Summary label={t("common.location")} value={line.allocationLocation ?? t("common.notAllocated")} mono />
+                <Summary label={t("common.prepared")} value={line.preparedQty} />
+                {Boolean(serialRequired) && <Summary label="SN" value={line.scannedSerials.join(" · ")} mono />}
               </div>
             </div>
           )}
-          {line.preparedQty > 0 && !allPrepared && !["Ready_for_Pickup", "Outbound", "ERP_Synced"].includes(order.status) && serialRequired && (
-            <div className="scanner">
-              <div className="scanner-title">
-                <ScanLine /> {t("scanner.scanSerial")}
-              </div>
-              <form className="scanner-row" onSubmit={scanSerial}>
-                <input
-                  ref={scannerRef}
-                  autoFocus
-                  autoComplete="off"
-                  placeholder={`${t("scanner.scanSerial")} → Enter`}
-                  value={scanner.value}
-                  disabled={scanner.inFlight}
-                  onChange={(event) => setScanner((current) => ({ ...current, value: event.target.value }))}
-                />
-                <Button className="primary" type="submit" disabled={scanner.inFlight}>
-                  {t("scanner.scanSerial")}
-                </Button>
-              </form>
-              <div className="scanner-progress">
-                <div><span>{t("scanner.required")}</span><strong>{line.requiredQty}</strong></div>
-                <div><span>{t("scanner.scanned")}</span><strong>{line.scannedSerials.length} / {line.requiredQty}</strong></div>
-                <div><span>{t("common.pendingBatch")}</span><strong>{serialBatch.length}</strong></div>
-              </div>
-              {scanner.feedback && <div className={`scan-feedback ${scanner.feedback.tone}`} aria-live="polite">{scanner.feedback.message}</div>}
-              <textarea
-                aria-label={t("bulk.serialNumbers")}
-                placeholder={t("outbound.pastePlaceholder")}
-                value={pasteList}
-                onChange={(event) => setPasteList(event.target.value)}
-                rows={4}
-              />
-              <div className="scanner-row">
-                <Button type="button" onClick={addPastedSerials} disabled={!pasteList.trim() || batchBusy}>{t("common.addPastedList")}</Button>
-                <label className="btn">
-                  {t("bulk.upload")}
-                  <input
-                    type="file"
-                    accept=".csv,.txt,.xlsx"
-                    hidden
-                    onChange={(event) => uploadSerialFile(event.target.files?.[0])}
-                  />
-                </label>
-                <Button className="primary" type="button" onClick={() => validateBatch()} disabled={!serialBatch.length || batchBusy}>
-                  {t("bulk.validate")} {serialBatch.length}
-                </Button>
-              </div>
-              {batchValidation && (
-                <>
-                  <div className="notice">
-                    {t("bulk.validationSummary", {
-                      total: batchValidation.summary.total,
-                      valid: batchValidation.summary.valid,
-                      invalid: batchValidation.summary.invalid,
-                    })}
-                  </div>
-                  <div className="table-wrap">
-                    <table>
-                      <thead><tr><th>SN</th><th>SKU</th><th>{t("common.location")}</th><th>{t("common.condition")}</th><th>{t("common.status")}</th><th>{t("common.result")}</th></tr></thead>
-                      <tbody>{batchValidation.results.map((row, index) => (
-                        <tr key={`${row.serialNumber}:${index}`}>
-                          <td className="mono">{row.serialNumber}</td><td>{row.sku ?? "—"}</td>
-                          <td>{row.location ?? "—"}</td><td>{row.condition ?? "—"}</td><td>{row.status ?? "—"}</td>
-                          <td>
-                            <Badge tone={row.valid ? "teal" : "red"}>
-                              {row.valid ? t("bulk.result.VALID") : friendlyError(row.code, row.message)}
-                            </Badge>
-                            <div className="subtle">{row.message}</div>
-                            {row.canRegisterAndAssign && (
-                              <label className="checkbox-row">
-                                <input
-                                  type="checkbox"
-                                  checked={registerUnknown.includes(row.serialNumber)}
-                                  onChange={(event) => setRegisterUnknown((current) =>
-                                    event.target.checked
-                                      ? [...new Set([...current, row.serialNumber])]
-                                      : current.filter((value) => value !== row.serialNumber),
-                                  )}
-                                />
-                                {t("outbound.registerAndAssign")}
-                              </label>
-                            )}
-                          </td>
-                        </tr>
-                      ))}</tbody>
-                    </table>
-                  </div>
-                  <Button
-                    className="primary"
-                    type="button"
-                    onClick={confirmValidBatch}
-                    disabled={batchValidation.summary.valid + registerUnknown.length === 0 || batchBusy}
-                  >
-                    {t("outbound.confirmSn", { count: batchValidation.summary.valid + registerUnknown.length })}
-                  </Button>
-                </>
-              )}
-              <div className="serial-chips">
-                {line.scannedSerials.map((serial) => (
-                  <span className="serial-chip" key={serial}>
-                    {serial}
-                  </span>
-                ))}
-                {!line.scannedSerials.length && (
-                  <span className="subtle">{t("scanner.waiting")}</span>
-                )}
-              </div>
-            </div>
+          {!canUseAtomicPreparation && !selectedLineComplete && !["Ready_for_Pickup", "Outbound", "ERP_Synced"].includes(order.status) && (
+            <div className="notice warn">{t("outbound.legacyPreparationException")}</div>
           )}
         </div>
         <div className="grid">

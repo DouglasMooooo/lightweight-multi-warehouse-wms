@@ -129,5 +129,15 @@ Domain and database codes are not translated.
 - Dispatch tests prove the server reuses preparation-assigned SN relations, posts Physical/Frozen and SN lifecycle changes, queues ERP write-back, and blocks incomplete authoritative evidence before ledger mutation.
 - Presentation tests prove raw `Prepared` maps to SN Pending and `Ready_for_Pickup` uses read-only SN evidence rather than ordinary pickup rescanning.
 - Preview audit was read-only: 11 raw `Prepared` orders, 12 serial-tracked lines and 18/18 assigned SN relations. No Preview data was modified.
+
+## Atomic outbound preparation — 2026-08-02
+
+- `tests/outbound-atomic-preparation.test.ts` exercises the authoritative service transaction for serial and non-serial lines.
+- Evidence includes atomic location/SN/allocation/Frozen/ledger/audit/readiness, all-or-nothing invalid SN handling, wrong SKU, wrong location, duplicates, incomplete SN quantity, insufficient available stock, progressive multi-line completion, automatic final-line promotion and safe replay rejection.
+- Existing outbound lifecycle tests cover read-only Awaiting Pickup evidence and dispatch reuse of preparation-assigned SNs without rescanning.
+- The transaction uses Serializable isolation with retry for database write conflicts; duplicate/replayed preparation cannot double-freeze or double-assign SNs.
+- `DEMO-OUTBOUND-001` is dedicated synthetic Preview inventory and is never automatically dispatched.
+- Chinese Preview smoke passed on 2026-08-02: the dedicated order appeared in 待备货, location selection exposed one SN scan/paste/upload workbench, both dedicated SNs validated, one 确认备货 action promoted it automatically to 待提货, assigned SNs became read-only, the scanner disappeared and 确认出库 became enabled. Confirm Dispatch was not clicked; browser console errors: 0.
+- Screenshots: `artifacts/outbound-atomic-preparation-zh/01-to-prepare.png`, `02-sn-validated.png`, `03-awaiting-pickup-read-only.png`, and final clean deployment evidence `04-final-preview-awaiting-pickup.png`.
 - Controlled Preview reconciliation DRY_RUN found six fully eligible orders and five blocked by missing InventoryBalance grains. Only the six eligible orders were promoted; the second APPLY promoted zero, proving idempotency.
 - The transaction compared every SYD InventoryBalance row before and after (Physical, Frozen, In Transit and version) and confirmed no change; ERP sync-job count also remained unchanged.

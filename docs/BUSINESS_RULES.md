@@ -1,6 +1,7 @@
 # Business Rules
 
-- Prepared leaves Physical unchanged, increases Frozen and decreases calculated Available.
+- Normal outbound preparation is one atomic command: confirm source location, exact quantity and required SNs, create allocation evidence, increase Frozen, preserve Physical, and re-evaluate order readiness.
+- SN capture is part of preparation. A normally processed serial-tracked line never requires a second “Complete SN” action.
 - Dispatch consumes the exact allocation locations, decreases Physical and Frozen, and requires all serial-tracked units.
 - Outbound SN validation checks SKU, condition, warehouse, allocated location, eligible status and other active allocations.
 - A faulty SN already in Repair or linked to an active RepairReturn is rejected.
@@ -12,7 +13,7 @@
 - ERP warehouse classification never replaces physical warehouse/location.
 - ERP Replacement Unit Information import creates `Pending_Allocation` demand only. It never freezes inventory and never reads Faulty Unit Information as the replacement SKU.
 - Allocation requires a physical location and creates relational demand against eligible stock; allocation alone changes neither Physical nor Frozen.
-- Prepared requires existing allocations. It leaves Physical unchanged and increases Frozen at each exact allocation grain.
+- Legacy `Prepared` records may retain their existing allocation-first evidence for exception review. New normal preparation does not expose Allocate, Confirm Prepared and Complete SN as separate operator actions.
 - Actual dispatch sets `OutboundOrder.outboundAt`; outbound reporting never substitutes `createdAt`.
 - Import, allocation, preparation and pickup readiness have separate timestamps and cannot stand in for actual dispatch.
 - One order line may allocate across several locations and may carry unit-level SN assignments without duplicating the order line.
@@ -30,8 +31,9 @@
 - Physically-present SN statuses are In_Stock, Prepared, Repair and Scrapped. Outbound and In_Transit do not count against Physical Qty.
 - Physical presence and outbound allocatability are separate policies. Scrapped remains physical but is never allocatable.
 - Shadow reconciliation and DRY_RUN never mutate inventory. SHADOW_SEED is explicit non-production opening import with ledger and audit evidence.
-- Operator-facing outbound stages are presentation mappings: Imported/Pending Allocation/Allocated are To Prepare; Partially Prepared is Partially Prepared; Prepared is SN Pending; only Ready for Pickup is Awaiting Pickup. Domain codes and ledger meaning do not change.
+- Operator-facing normal outbound stages are To Prepare, Partially Prepared (multi-line work only), Awaiting Pickup, Outbound and ERP outcome. Raw `Prepared` is shown only as a legacy/incomplete SN Pending exception; it is not a normal step.
 - `Ready_for_Pickup` requires every line to have exact prepared and allocated quantity, confirmed prepared locations and, for serial-tracked products, exactly one authoritative Prepared SN per required unit at the allocated warehouse/location with matching SKU and condition.
+- Awaiting Pickup displays assigned locations and SNs as read-only evidence and never requests an ordinary second scan.
 - The final valid preparation-stage SN commit re-evaluates the whole order and automatically promotes it to `Ready_for_Pickup`. Dispatch reuses those assignments and never requires an ordinary second pickup scan.
 - Confirm Dispatch is accepted only from `Ready_for_Pickup`, rechecks the authoritative allocations and SN relations inside the transaction, reduces Physical and Frozen, marks assigned SNs Outbound, records ledger/audit evidence and queues ERP write-back.
 - Scanner-based Transfer Out groups valid SNs by Product + Condition and posts one atomic transfer operation. Transfer receipt preserves condition and requires explicit destination physical location.

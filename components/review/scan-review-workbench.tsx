@@ -55,6 +55,7 @@ interface ReviewResult {
 
 interface ReviewResponse {
   batchReference?: string;
+  complete?: boolean;
   summary: {
     total: number;
     valid: number;
@@ -215,6 +216,7 @@ export function ScanReviewWorkbench({
   const byRow = new Map(validation?.results.map((result) => [result.rowId, result]));
   const canConfirm = Boolean(
     validation?.summary.valid &&
+    validation.complete !== false &&
     !validation.summary.needsAttention &&
     !validation.summary.unresolved,
   );

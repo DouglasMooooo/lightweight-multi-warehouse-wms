@@ -21,6 +21,7 @@
     "db:seed": "prisma db seed",
     "db:bootstrap-preview": "tsx scripts/bootstrap-preview-db.ts",
     "demo:transfer-fixture": "tsx scripts/ensure-demo-transfer-fixture.ts",
+    "demo:outbound-fixture": "tsx scripts/ensure-demo-outbound-fixture.ts",
     "outbound:reconcile-preview": "tsx scripts/reconcile-preview-outbound-readiness.ts"
   },
   "dependencies": {

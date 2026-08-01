@@ -1,5 +1,19 @@
 # Outbound Lifecycle Audit — 2026-08-01
 
+## Normal operator flow simplification — 2026-08-02
+
+The prior correction made readiness authoritative but left the historical allocation, quantity-preparation and SN-commit commands visible as separate ordinary actions. The database could protect each command, but a client interruption between commands could still leave a valid yet operationally incomplete intermediate record.
+
+New and clean orders now use one server-side Serializable transaction:
+
+`ERP order → Confirm Preparation (location + exact quantity + required SNs) → Awaiting Pickup → Confirm Dispatch → ERP sync`
+
+Confirm Preparation validates order/line state, active source location, condition, available Physical stock, exact serial quantity, SN identity/SKU/condition/warehouse/location/status and competing assignments. It then creates prepared allocation evidence, binds and marks SNs Prepared, increases Frozen without changing Physical, updates quantities, writes ledger/audit evidence, generates the Pickup Code when the whole order is complete and promotes automatically. Multi-line orders remain Partially Prepared until the final line succeeds.
+
+Awaiting Pickup keeps the preparation-assigned location and SNs read-only. Confirm Dispatch reuses those relations and performs no second scan. Raw `Prepared`/SN Pending remains only an exception presentation for legacy incomplete evidence.
+
+`DEMO-OUTBOUND-001` is a guarded Preview-only synthetic fixture. Its creator requires explicit permission and Preview environment metadata, refuses partial fixtures, preserves any existing lifecycle state on rerun, and never dispatches the order.
+
 ## Root cause
 
 The database-backed `prepareOutbound` command promoted an order to `Ready_for_Pickup` after prepared quantities reached demand, without requiring complete authoritative SN relations for serial-tracked lines. Presentation and query code also grouped raw `Prepared` together with `Ready_for_Pickup`, while the detail UI kept the SN scanner active for both. The result was an Awaiting Pickup queue that could still ask the operator to complete SN work.
