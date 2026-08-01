@@ -26,7 +26,7 @@ describe("Final patch batch labels", () => {
         id: "order-2",
         shNo: "SH-2",
         pickupCode: "PK-1",
-        status: "Prepared",
+        status: "Ready_for_Pickup",
         warehouse: { code: "SYD" },
         lines: [{
           requiredQty: 3,

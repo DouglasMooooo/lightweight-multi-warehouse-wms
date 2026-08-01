@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   outboundOperatorStage,
   outboundQueueFor,
+  outboundSerialMode,
   statusesForOutboundQueue,
 } from "@/domain/outbound-presentation";
 import { BulkScanSession, parseQRScan, QRScanResolver, type ScanResult } from "@/domain/scan";
@@ -14,18 +15,22 @@ describe("Sprint 6 outbound presentation semantics", () => {
   it("maps physical workflow states to operator-facing queues without changing domain codes", () => {
     expect(outboundOperatorStage("Imported")).toBe("TO_PREPARE");
     expect(outboundOperatorStage("Partially_Prepared")).toBe("PARTIALLY_PREPARED");
-    expect(outboundOperatorStage("Prepared")).toBe("AWAITING_PICKUP");
+    expect(outboundOperatorStage("Prepared")).toBe("SN_PENDING");
     expect(outboundOperatorStage("Ready_for_Pickup")).toBe("AWAITING_PICKUP");
     expect(outboundOperatorStage("Outbound")).toBe("OUTBOUND");
     expect(outboundOperatorStage("ERP_Synced")).toBe("ERP_SYNCED");
     expect(outboundOperatorStage("Prepared", "Failed")).toBe("ERP_ISSUE");
-    expect(outboundQueueFor("Prepared")).toBe("Awaiting_Pickup");
+    expect(outboundQueueFor("Prepared")).toBe("SN_Pending");
+    expect(statusesForOutboundQueue("Awaiting_Pickup")).toEqual(["Ready_for_Pickup"]);
     expect(statusesForOutboundQueue("To_Prepare")).toContain("Pending_Allocation");
+    expect(outboundSerialMode("Prepared", true, false)).toBe("CAPTURE");
+    expect(outboundSerialMode("Ready_for_Pickup", true, true)).toBe("READ_ONLY");
   });
 
   it("has matching English and Simplified Chinese operator labels", () => {
     for (const key of [
       "outbound.stage.toPrepare",
+      "outbound.stage.snPending",
       "outbound.stage.awaitingPickup",
       "transfer.receiveTitle",
       "label.pickupBatch",

@@ -71,9 +71,10 @@ export class PageQueryService {
         needsAllocation: count(["Imported", "Pending_Allocation"]),
         allocated: count(["Allocated"]),
         prepared: count(["Prepared", "Partially_Prepared"]),
+        snPending: count(["Prepared"]),
         readyForPickup: count(["Ready_for_Pickup"]),
         toPrepare: count(["Imported", "Pending_Allocation", "Allocated"]),
-        awaitingPickup: count(["Prepared", "Ready_for_Pickup"]),
+        awaitingPickup: count(["Ready_for_Pickup"]),
         outboundToday,
         faultyReturns,
         repairQueue,
@@ -209,7 +210,8 @@ export class PageQueryService {
     const queueStatuses =
       input.status === "To_Prepare" ? ["Draft", "Ready", "Imported", "Pending_Allocation", "Allocated"] :
       input.status === "Partially_Prepared" ? ["Partially_Prepared"] :
-      input.status === "Awaiting_Pickup" ? ["Prepared", "Ready_for_Pickup"] :
+      input.status === "SN_Pending" ? ["Prepared"] :
+      input.status === "Awaiting_Pickup" ? ["Ready_for_Pickup"] :
       input.status === "Outbound" ? ["Outbound", "ERP_Synced"] :
       undefined;
     const where: Prisma.OutboundOrderWhereInput = {

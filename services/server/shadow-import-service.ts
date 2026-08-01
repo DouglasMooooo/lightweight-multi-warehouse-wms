@@ -373,7 +373,7 @@ export class ShadowImportService {
           if (!order.pickupCode) continue;
           const current = pickupStatus.get(order.pickupCode);
           if (order.status === "Outbound") pickupStatus.set(order.pickupCode, "Picked_Up");
-          else if (order.status === "Prepared" && current !== "Picked_Up") pickupStatus.set(order.pickupCode, "Ready");
+          else if (order.status === "Prepared" && current !== "Picked_Up") pickupStatus.set(order.pickupCode, "Draft");
           else if (!current) pickupStatus.set(order.pickupCode, "Draft");
         }
         const pickupBatches = new Map<string, Awaited<ReturnType<typeof tx.pickupBatch.upsert>>>();
@@ -427,7 +427,7 @@ export class ShadowImportService {
               importedAt: new Date(result.cutoverAt),
               allocatedAt: prepared ? new Date(result.cutoverAt) : undefined,
               preparedAt: prepared ? new Date(result.cutoverAt) : undefined,
-              readyForPickupAt: status === "Prepared" ? new Date(result.cutoverAt) : undefined,
+              readyForPickupAt: undefined,
               outboundAt: outbound ? orderRow.outboundAt : undefined,
               customerLabel: "Workbook migration evidence",
             },

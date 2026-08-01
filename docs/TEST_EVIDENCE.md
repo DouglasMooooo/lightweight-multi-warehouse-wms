@@ -118,3 +118,14 @@ The following values intentionally remain English/domain-coded where shown:
   presentation mapping.
 
 Domain and database codes are not translated.
+
+## Outbound lifecycle correction — 2026-08-01
+
+- `pnpm test`: 17 files, 196 tests passed.
+- `pnpm typecheck`: passed.
+- `pnpm lint`: passed.
+- `pnpm build`: Next.js 16.2.12 production build passed.
+- Dedicated database-service tests prove quantity-complete without SN remains pending, partial SN remains pending, final SN assignment auto-promotes, wrong SKU/location and duplicate SNs fail, non-serial lines can become ready, and every line in a multi-line order must complete.
+- Dispatch tests prove the server reuses preparation-assigned SN relations, posts Physical/Frozen and SN lifecycle changes, queues ERP write-back, and blocks incomplete authoritative evidence before ledger mutation.
+- Presentation tests prove raw `Prepared` maps to SN Pending and `Ready_for_Pickup` uses read-only SN evidence rather than ordinary pickup rescanning.
+- Preview audit was read-only: 11 raw `Prepared` orders, 12 serial-tracked lines and 18/18 assigned SN relations. No Preview data was modified.

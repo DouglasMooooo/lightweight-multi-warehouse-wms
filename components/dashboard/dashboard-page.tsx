@@ -25,7 +25,7 @@ interface DashboardData {
   warehouse: { code: string; timezone: string };
   tasks: {
     needsAllocation: number; allocated: number; prepared: number; readyForPickup: number;
-    toPrepare: number; awaitingPickup: number;
+    toPrepare: number; snPending: number; awaitingPickup: number;
     outboundToday: number; faultyReturns: number; repairQueue: number; transfersInTransit: number;
     exceptions: number; erpSyncFailures: number;
   };
@@ -55,6 +55,7 @@ export function DashboardPage({ warehouse }: { warehouse: WarehouseCode }) {
   const tasks = data.tasks;
   const primary = [
     ["dashboard.toPrepare", tasks.toPrepare, "/outbound", "blue"],
+    ["dashboard.snPending", tasks.snPending, "/outbound", "amber"],
     ["dashboard.awaitingPickup", tasks.awaitingPickup, "/outbound", "amber"],
     ["dashboard.repairQueue", tasks.repairQueue, "/repair", "blue"],
     ["dashboard.transfers", tasks.transfersInTransit, "/transfers", "amber"],

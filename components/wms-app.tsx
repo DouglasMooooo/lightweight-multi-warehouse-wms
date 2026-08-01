@@ -53,7 +53,7 @@ import {
   type ScannerState,
 } from "@/lib/scanner";
 import { formatWarehouseDateTime } from "@/lib/warehouse-time";
-import { outboundOperatorStage, outboundQueueFor, type OutboundQueue } from "@/domain/outbound-presentation";
+import { outboundOperatorStage, outboundQueueFor, outboundSerialMode, type OutboundQueue } from "@/domain/outbound-presentation";
 
 const routeTitleKeys: Record<string, string> = {
   dashboard: "title.dashboard", inventory: "title.inventory", outbound: "title.outbound",
@@ -307,6 +307,7 @@ function OutboundList({
         {[
           ["To_Prepare", t("outbound.queue.toPrepare")],
           ["Partially_Prepared", t("outbound.queue.partiallyPrepared")],
+          ["SN_Pending", t("outbound.queue.snPending")],
           ["Awaiting_Pickup", t("outbound.queue.awaitingPickup")],
           ["Outbound", t("outbound.queue.outbound")],
           ["ERP_Issues", t("outbound.queue.erpIssues")],
@@ -375,7 +376,8 @@ function OutboundList({
               const nextAction =
                 ["Imported", "Pending_Allocation"].includes(order.status) ? t("outbound.action.allocate") :
                 order.status === "Allocated" ? t("outbound.action.prepare") :
-                ["Prepared", "Partially_Prepared"].includes(order.status) ? t("outbound.action.completeSn") :
+                order.status === "Partially_Prepared" ? t("outbound.action.prepare") :
+                order.status === "Prepared" ? t("outbound.action.completeSn") :
                 order.status === "Ready_for_Pickup" ? t("outbound.action.dispatch") : t("common.open");
               return (
                 <tr key={order.id}>
@@ -395,6 +397,7 @@ function OutboundList({
                   <td><StatusBadge code={order.status} label={t(`outbound.stage.${{
                     TO_PREPARE: "toPrepare",
                     PARTIALLY_PREPARED: "partiallyPrepared",
+                    SN_PENDING: "snPending",
                     AWAITING_PICKUP: "awaitingPickup",
                     OUTBOUND: "outbound",
                     ERP_SYNCED: "erpSynced",
@@ -475,20 +478,26 @@ function OutboundDetail({
   const activeOrderId = order.id;
   const activeOrderShNo = order.shNo;
   const canDispatch =
+    order.status === "Ready_for_Pickup" &&
     order.lines.every((candidate) => {
       const requiresSerial = state.products.find((row) => row.sku === candidate.sku)?.serialTrackingRequired;
       return candidate.preparedQty === candidate.requiredQty &&
         (!requiresSerial || candidate.scannedSerials.length === candidate.requiredQty);
-    }) &&
-    order.status !== "Outbound";
+    });
   const canPrepare = line.allocatedQty > line.preparedQty && order.status !== "Outbound";
   const allPrepared = order.lines.every((candidate) => candidate.preparedQty >= candidate.requiredQty);
+  const allSerialsComplete = order.lines.every((candidate) => {
+    const requiresSerial = state.products.find((row) => row.sku === candidate.sku)?.serialTrackingRequired;
+    return !requiresSerial || candidate.scannedSerials.length === candidate.requiredQty;
+  });
+  const serialMode = outboundSerialMode(order.status, allPrepared, allSerialsComplete);
   const dispatched = ["Outbound", "ERP_Synced"].includes(order.status);
+  const readyForPickup = order.status === "Ready_for_Pickup" || dispatched;
   const workflow = [
     { key: "outbound.step.erpImported", complete: true },
     { key: "outbound.step.toPrepare", complete: allPrepared },
-    { key: "outbound.step.preparationComplete", complete: allPrepared },
-    { key: "outbound.step.awaitingPickup", complete: dispatched },
+    { key: "outbound.step.preparationComplete", complete: allPrepared && allSerialsComplete },
+    { key: "outbound.step.awaitingPickup", complete: readyForPickup },
     { key: "outbound.step.outbound", complete: dispatched },
   ];
   const currentWorkflowIndex = workflow.findIndex((stage) => !stage.complete);
@@ -662,7 +671,33 @@ function OutboundDetail({
           </div>
         ))}
       </div>
-      <OutboundBatchScanner order={order} onCommitted={refresh} />
+      {serialMode === "CAPTURE" && (
+        <OutboundBatchScanner order={order} onCommitted={refresh} />
+      )}
+      {serialMode === "READ_ONLY" && order.status === "Ready_for_Pickup" && (
+        <div className="panel">
+          <div className="panel-head">
+            <div>
+              <h3>{t("outbound.assignedSnEvidence")}</h3>
+              <span className="subtle">{t("outbound.assignedSnHelp")}</span>
+            </div>
+          </div>
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>SKU</th><th>{t("common.model")}</th><th>{t("bulk.assigned")}</th></tr></thead>
+              <tbody>{order.lines.map((candidate) => (
+                <tr key={candidate.id}>
+                  <td className="mono strong">{candidate.sku}</td>
+                  <td>{candidate.model}</td>
+                  <td><div className="serial-chips">{candidate.scannedSerials.map((serial) => (
+                    <span className="serial-chip" key={serial}>{serial}</span>
+                  ))}{!candidate.scannedSerials.length && <span className="subtle">{t("common.notRequired")}</span>}</div></td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        </div>
+      )}
       <div className="split">
         <div className="grid">
           <div className="panel">
@@ -671,6 +706,7 @@ function OutboundDetail({
               <StatusBadge code={order.status} label={t(`outbound.stage.${{
                 TO_PREPARE: "toPrepare",
                 PARTIALLY_PREPARED: "partiallyPrepared",
+                SN_PENDING: "snPending",
                 AWAITING_PICKUP: "awaitingPickup",
                 OUTBOUND: "outbound",
                 ERP_SYNCED: "erpSynced",
@@ -767,7 +803,7 @@ function OutboundDetail({
               </div>
             </div>
           )}
-          {line.preparedQty > 0 && order.status !== "Outbound" && serialRequired && (
+          {line.preparedQty > 0 && !allPrepared && !["Ready_for_Pickup", "Outbound", "ERP_Synced"].includes(order.status) && serialRequired && (
             <div className="scanner">
               <div className="scanner-title">
                 <ScanLine /> {t("scanner.scanSerial")}

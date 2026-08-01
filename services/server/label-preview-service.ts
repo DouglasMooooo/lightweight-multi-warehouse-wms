@@ -77,7 +77,7 @@ export class LabelPreviewService {
     const foundIds = new Set(orders.map((order) => order.id));
     const missing = selectedIds.filter((id) => !foundIds.has(id));
     const ineligible = orders
-      .filter((order) => !["Prepared", "Ready_for_Pickup"].includes(order.status))
+      .filter((order) => order.status !== "Ready_for_Pickup")
       .map((order) => order.shNo);
     const warehouses = [...new Set(orders.map((order) => order.warehouse.code))];
     const errors = [

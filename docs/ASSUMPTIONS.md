@@ -80,7 +80,7 @@ Until explicit cutover approval, the workbook remains the production operational
 
 ## Sprint 6 operations V2 decisions
 
-- Internal outbound enums remain stable. Operator presentation maps Imported, Pending Allocation and Allocated to `To Prepare`; Prepared and Ready for Pickup map to `Awaiting Pickup`. This resolves the workbook's overloaded Prepared wording without rewriting ledger history.
+- Internal outbound enums remain stable. Operator presentation maps Imported, Pending Allocation and Allocated to `To Prepare`; `Prepared` means quantity-prepared but SN/evidence still pending; only `Ready_for_Pickup` maps to `Awaiting Pickup`. This resolves the workbook's overloaded Prepared wording without rewriting ledger history.
 - The workbook label prototype is output evidence, not a mutation workflow. Pickup Code is the first grouping key; only identical SKU + Model + ERP Warehouse rows aggregate. Missing Pickup Code falls back to SH No and never creates a synthetic code.
 - The explicit Sprint 6 rule extends the workbook's SH-oriented label examples across all SH documents sharing one Pickup Code. Different ERP warehouse classes remain distinct rows on the same A4 page.
 - QR parsing accepts structured key/value payloads, a recognised SKU-and-SN pipe format, and plain SN. Unresolved values remain Manual Review; neither the parser nor scanner UI infers product identity from serial text.
@@ -101,7 +101,14 @@ Until explicit cutover approval, the workbook remains the production operational
 
 ## Final business automation and reporting decisions
 
-- Batch label selection is limited to existing Prepared or Ready_for_Pickup orders in one physical warehouse. The server reloads authoritative order lines and rejects stale or ineligible selections.
+- Batch label selection is limited to authoritative `Ready_for_Pickup` orders in one physical warehouse. The server reloads order lines and rejects quantity-prepared but SN-pending or stale selections.
+
+## Outbound lifecycle correction (2026-08-01)
+
+- The prior implementation promoted an order when prepared quantities alone were complete. This conflicted with the explicit serial-tracked preparation requirement and with the database SN relations used by dispatch.
+- The corrected policy uses existing statuses rather than a schema change: raw `Prepared` is the SN-pending operator stage, while raw `Ready_for_Pickup` is the only Awaiting Pickup state.
+- Readiness uses relational allocation and SerialNumber evidence; no workbook formula, demo-state projection or UI counter can promote an order.
+- The read-only audit of the current Preview found 11 rows shown by the old Awaiting Pickup filter. All had raw status `Prepared`; across 12 serial-tracked lines they had 18 required, 18 prepared and 18 assigned SN relations. No missing SN was fabricated and Preview data was not changed. See `docs/OUTBOUND_LIFECYCLE_AUDIT.md`.
 - One Pickup Code remains one A4 page. Missing Pickup Code falls back to SH No; different ERP warehouses remain separate rows on that page.
 - Faulty receiving uses WMS identity and dispatched allocation history before ERP fallback. A missing original SH, missing SKU, wrong warehouse or unresolved identity remains an exception and is not guessed.
 - A Supply Chain expected-inbound file can populate a bounded one-SKU batch and expected quantity. Final physical receipt still requires explicit operator confirmation.

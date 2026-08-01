@@ -30,7 +30,10 @@
 - Physically-present SN statuses are In_Stock, Prepared, Repair and Scrapped. Outbound and In_Transit do not count against Physical Qty.
 - Physical presence and outbound allocatability are separate policies. Scrapped remains physical but is never allocatable.
 - Shadow reconciliation and DRY_RUN never mutate inventory. SHADOW_SEED is explicit non-production opening import with ledger and audit evidence.
-- Operator-facing outbound stages are presentation mappings: Imported/Pending Allocation/Allocated are To Prepare; Prepared/Ready for Pickup are Awaiting Pickup. Domain codes and ledger meaning do not change.
+- Operator-facing outbound stages are presentation mappings: Imported/Pending Allocation/Allocated are To Prepare; Partially Prepared is Partially Prepared; Prepared is SN Pending; only Ready for Pickup is Awaiting Pickup. Domain codes and ledger meaning do not change.
+- `Ready_for_Pickup` requires every line to have exact prepared and allocated quantity, confirmed prepared locations and, for serial-tracked products, exactly one authoritative Prepared SN per required unit at the allocated warehouse/location with matching SKU and condition.
+- The final valid preparation-stage SN commit re-evaluates the whole order and automatically promotes it to `Ready_for_Pickup`. Dispatch reuses those assignments and never requires an ordinary second pickup scan.
+- Confirm Dispatch is accepted only from `Ready_for_Pickup`, rechecks the authoritative allocations and SN relations inside the transaction, reduces Physical and Frozen, marks assigned SNs Outbound, records ledger/audit evidence and queues ERP write-back.
 - Scanner-based Transfer Out groups valid SNs by Product + Condition and posts one atomic transfer operation. Transfer receipt preserves condition and requires explicit destination physical location.
 - Label preview and printing are read-only output operations. Pickup Code produces one A4 batch label; missing Pickup Code falls back to SH No; Unit SN labels are explicit opt-in.
 - Operational exceptions belong to an explicit physical warehouse. Warehouse dashboards, maps, exception queues and reports exclude legacy unscoped exceptions rather than attributing them to an invented warehouse.

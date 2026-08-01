@@ -9,6 +9,7 @@ import {
 import { DomainError } from "@/domain/errors";
 import { getPrisma } from "@/lib/prisma";
 import { validateRegistration } from "@/services/server/bulk-serial-registration-service";
+import { reconcileOutboundReadiness } from "@/services/server/outbound-readiness-service";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -279,6 +280,11 @@ export class BulkSerialService {
             remark: `Bulk serial assignment submitted ${normalized.length}; accepted ${accepted}; registered unknown ${registerUnknown.length}; rejected 0.`,
           },
         });
+        const readiness = await reconcileOutboundReadiness(
+          tx,
+          input.orderId,
+          user.id,
+        );
         return {
           orderId: input.orderId,
           lineId: input.lineId,
@@ -288,6 +294,7 @@ export class BulkSerialService {
           assignedQty: validation.assignedQty + accepted,
           requiredQty: validation.requiredQty,
           registeredUnknown: registerUnknown.length,
+          orderStatus: readiness.status,
         };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },

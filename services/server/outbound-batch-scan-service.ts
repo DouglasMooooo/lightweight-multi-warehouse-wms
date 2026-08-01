@@ -5,11 +5,11 @@ import { Prisma, type PrismaClient } from "@/generated/prisma/client";
 import { DomainError } from "@/domain/errors";
 import { automaticOrderLineMatch, type ScanReviewInputRow } from "@/domain/scan-review";
 import { parseQRScan, type ScanResult } from "@/domain/scan";
-import { formatPickupCode } from "@/domain/rules";
 import type { StockCondition, WarehouseCode } from "@/domain/types";
 import { getPrisma } from "@/lib/prisma";
 import { InventoryRepository } from "@/repositories/inventory-repository";
 import { QRScanService } from "@/services/server/qr-scan-service";
+import { reconcileOutboundReadiness } from "@/services/server/outbound-readiness-service";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -440,45 +440,24 @@ export class OutboundBatchScanService {
           (conditionSummary[line.requiredCondition] ?? 0) + Number(preparedQty);
       }
 
-      let pickupCode = order.pickupCode;
-      let pickupBatchId = order.pickupBatchId;
-      if (!pickupBatchId) {
-        await tx.pickupSequence.upsert({
-          where: { warehouseId: order.warehouseId },
-          update: {},
-          create: { warehouseId: order.warehouseId, nextValue: 1 },
-        });
-        const sequence = await tx.pickupSequence.update({
-          where: { warehouseId: order.warehouseId },
-          data: { nextValue: { increment: 1 } },
-        });
-        pickupCode = pickupCode ?? formatPickupCode(
-          order.warehouse.code as WarehouseCode,
-          sequence.nextValue - 1,
-        );
-        const batch = await tx.pickupBatch.upsert({
-          where: { code: pickupCode },
-          update: { readyAt: preparedAt, status: "Ready" },
-          create: {
-            code: pickupCode,
-            warehouseId: order.warehouseId,
-            readyAt: preparedAt,
-            status: "Ready",
-          },
-        });
-        pickupBatchId = batch.id;
-      }
       await tx.outboundOrder.update({
         where: { id: order.id },
         data: {
-          status: "Ready_for_Pickup",
-          pickupCode,
-          pickupBatchId,
           allocatedAt: order.allocatedAt ?? preparedAt,
           preparedAt: order.preparedAt ?? preparedAt,
-          readyForPickupAt: preparedAt,
         },
       });
+      const readiness = await reconcileOutboundReadiness(
+        tx,
+        order.id,
+        who.id,
+        preparedAt,
+      );
+      if (!readiness.ready)
+        throw new DomainError(
+          "Outbound review did not produce authoritative pickup readiness.",
+          "OUTBOUND_REVIEW_INCOMPLETE",
+        );
       await tx.auditLog.create({
         data: {
           userId: who.id,
@@ -500,7 +479,7 @@ export class OutboundBatchScanService {
       return {
         orderId: order.id,
         shNo: order.shNo,
-        status: "Ready_for_Pickup",
+        status: readiness.status,
         reviewBatchReference,
         accepted: validRows.length,
         operationId,

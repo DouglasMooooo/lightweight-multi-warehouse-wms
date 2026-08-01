@@ -13,7 +13,6 @@ import {
 } from "@/domain/repair-rules";
 import {
   assertFaultyReceiptAllowed,
-  formatPickupCode,
   validateAdjustment,
   validateMove,
   validateOutboundSerial,
@@ -37,6 +36,10 @@ import type { ERPAdapter, ERPOutboundOrder, ERPSerialLookup } from "@/integratio
 import { createERPAdapter } from "@/integrations/erp-adapter-factory";
 import { getPrisma } from "@/lib/prisma";
 import { InventoryRepository, type BalanceKey } from "@/repositories/inventory-repository";
+import {
+  evaluateOutboundReadiness,
+  reconcileOutboundReadiness,
+} from "@/services/server/outbound-readiness-service";
 import { seedDemo } from "@/prisma/demo-seed";
 import { assertDemoResetAllowed } from "@/lib/environment";
 
@@ -145,27 +148,6 @@ async function requireProduct(tx: Tx, sku: string) {
   const product = await tx.product.findFirst({ where: { sku, active: true } });
   if (!product) throw new DomainError("Unknown or inactive SKU.");
   return product;
-}
-
-async function pickupCode(tx: Tx, warehouse: { id: string; code: string }, who: Actor) {
-  await tx.pickupSequence.upsert({
-    where: { warehouseId: warehouse.id },
-    update: {},
-    create: { warehouseId: warehouse.id, nextValue: 1 },
-  });
-  const updated = await tx.pickupSequence.update({
-    where: { warehouseId: warehouse.id },
-    data: { nextValue: { increment: 1 } },
-  });
-  const code = formatPickupCode(warehouse.code as WarehouseCode, updated.nextValue - 1);
-  await audit(tx, who, {
-    operation: "Generated pickup code",
-    entityType: "PickupSequence",
-    entityId: warehouse.id,
-    businessReference: code,
-    remark: `Atomically generated ${code}.`,
-  });
-  return code;
 }
 
 function balanceKey(input: {
@@ -1039,36 +1021,11 @@ export class WmsApplicationService {
       }
       const preparedQty = line.preparedQty.plus(preparedDelta);
       await tx.outboundOrderLine.update({ where: { id: line.id }, data: { preparedQty } });
-      const allLines = await tx.outboundOrderLine.findMany({ where: { outboundOrderId: input.orderId } });
-      const complete = allLines.every((row) =>
-        row.id === line.id ? preparedQty.equals(row.requiredQty) : row.preparedQty.equals(row.requiredQty),
-      );
-      let code = line.outboundOrder.pickupCode;
-      let batchId = line.outboundOrder.pickupBatchId;
-      if (complete && !batchId) {
-        code = code ?? (await pickupCode(tx, line.outboundOrder.warehouse, who));
-        const batch = await tx.pickupBatch.upsert({
-          where: { code },
-          update: { readyAt: at, status: "Ready" },
-          create: {
-            code,
-            warehouseId: line.outboundOrder.warehouseId,
-            readyAt: at,
-            status: "Ready",
-          },
-        });
-        batchId = batch.id;
-      }
       await tx.outboundOrder.update({
         where: { id: input.orderId },
-        data: {
-          pickupCode: code,
-          pickupBatchId: batchId,
-          status: complete ? "Ready_for_Pickup" : "Prepared",
-          preparedAt: line.outboundOrder.preparedAt ?? at,
-          readyForPickupAt: complete ? at : null,
-        },
+        data: { preparedAt: line.outboundOrder.preparedAt ?? at },
       });
+      await reconcileOutboundReadiness(tx, input.orderId, who.id, at);
       await audit(tx, who, {
         operation: "Prepared outbound",
         entityType: "OutboundOrder",
@@ -1145,6 +1102,7 @@ export class WmsApplicationService {
         businessReference: line.outboundOrder.shNo,
         remark: `${serial.serialNumber} validated for SKU, condition, warehouse and allocated physical location.`,
       });
+      await reconcileOutboundReadiness(tx, input.orderId, who.id);
     });
   }
 
@@ -1164,6 +1122,17 @@ export class WmsApplicationService {
         },
       });
       if (!order) throw new DomainError("Outbound order not found.");
+      if (order.status !== "Ready_for_Pickup")
+        throw new DomainError(
+          "Outbound order is not ready for pickup; complete preparation and serial assignment first.",
+          "OUTBOUND_NOT_READY_FOR_PICKUP",
+        );
+      const readiness = evaluateOutboundReadiness(order);
+      if (!readiness.ready)
+        throw new DomainError(
+          "Authoritative preparation or serial evidence changed before dispatch.",
+          "OUTBOUND_READINESS_CHANGED",
+        );
       const inventory = new InventoryRepository(tx);
       const op = operationId();
       const outboundAt = new Date();
@@ -1172,12 +1141,6 @@ export class WmsApplicationService {
           throw new DomainError("All requested stock must be prepared before dispatch.");
         const allocated = line.allocations.reduce((sum, row) => sum.plus(row.quantity), decimal(0));
         if (!allocated.equals(line.requiredQty)) throw new DomainError("Prepared allocations do not match required quantity.");
-        if (
-          line.product.serialTrackingRequired &&
-          (line.allocations.some((row) => !row.serialNumberId || !row.quantity.equals(1)) ||
-            line.allocations.length !== number(line.requiredQty))
-        )
-          throw new DomainError("Product outbound must have all required serial numbers.");
         for (const allocation of line.allocations) {
           const key = balanceKey({
             warehouseId: order.warehouseId,
