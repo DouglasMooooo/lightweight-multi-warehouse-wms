@@ -90,7 +90,7 @@ export function BatchLabelPreview() {
               {label.lines.map((line) => (
                 <div className="label-detail" key={`${line.sku}:${line.model}:${line.erpWarehouse}`}>
                   <span>{line.sku} · {line.model}</span>
-                  <strong>{line.erpWarehouse} · Qty {line.qty}</strong>
+                  <strong>{line.erpWarehouse === "Unmapped" ? t("status.Unmapped") : line.erpWarehouse} · {t("common.quantityShort")} {line.qty}</strong>
                 </div>
               ))}
               <div className="label-total"><span>{t("label.totalQty")}</span><strong>{label.totalQty}</strong></div>

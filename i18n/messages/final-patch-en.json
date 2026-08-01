@@ -51,5 +51,21 @@
   "bulk.originalSh": "Original SH",
   "bulk.previousStatus": "Previous Status",
   "bulk.returnStatus": "Return Status",
-  "bulk.repairLocation": "Repair Location"
+  "bulk.repairLocation": "Repair Location",
+  "dashboard.availableUnits": "Allocatable Product Stock",
+  "report.summary.available": "Physical Available Stock",
+  "report.historyBaselineInsufficient": "Historical closing inventory unavailable: an opening ledger baseline does not exist before this period.",
+  "report.historyBaselineInsufficientShort": "Unavailable: insufficient historical baseline",
+  "report.areaMetricUnavailable": "Unavailable: warehouse area not configured",
+  "status.Not registered": "Not registered",
+  "status.Unmapped": "Unmapped",
+  "map.inventoryScopeAll": "All inventory units · Products + Materials",
+  "map.floorCaption": "SYD · OPERATIONAL FLOOR · NOT TO SCALE",
+  "map.tooltipPhysical": "Physical",
+  "map.tooltipFrozen": "Frozen",
+  "map.tooltipAvailable": "Available",
+  "map.tooltipMixed": "Mixed",
+  "map.tooltipEmpty": "Empty",
+  "repair.scanReturnedStep": "1 · Scan returned unit",
+  "status.Return_to_Repair": "Return to Repair"
 }

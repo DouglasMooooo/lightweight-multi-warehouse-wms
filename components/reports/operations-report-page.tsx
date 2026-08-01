@@ -26,15 +26,16 @@ type OperationsReport = {
   openingPhysical?: number;
   closingPhysical?: number;
   averagePhysical?: number;
-  frozenAwaitingPickup: number;
-  inTransit: number;
-  repairInventory: number;
+  frozenAwaitingPickup?: number;
+  inTransit?: number;
+  repairInventory?: number;
   operationalTurnover?: number;
   inventoryDays?: number;
   outboundDensity?: number;
   inventoryDensity?: number;
   areaConfigured: boolean;
   historyAvailable: boolean;
+  historyUnavailableReason?: "HISTORICAL_BASELINE_INSUFFICIENT";
   openOperationalExceptions: number;
 };
 
@@ -84,6 +85,14 @@ export function OperationsReportPage({ warehouse }: { warehouse: WarehouseCode }
 
   const value = (number: number | undefined, digits = 0) =>
     number === undefined ? t("report.unavailable") : number.toLocaleString(undefined, { maximumFractionDigits: digits });
+  const historicalValue = (number: number | undefined, digits = 0) =>
+    number === undefined
+      ? t("report.historyBaselineInsufficientShort")
+      : number.toLocaleString(undefined, { maximumFractionDigits: digits });
+  const areaValue = (number: number | undefined, digits = 0) =>
+    number === undefined
+      ? t("report.areaMetricUnavailable")
+      : number.toLocaleString(undefined, { maximumFractionDigits: digits });
 
   return (
     <>
@@ -134,9 +143,12 @@ export function OperationsReportPage({ warehouse }: { warehouse: WarehouseCode }
               <p>{businessDate(report.period.from, report.warehouse.timezone)} → {businessDate(report.period.to, report.warehouse.timezone)} · {report.warehouse.timezone}</p>
             </div>
             <Badge tone={report.historyAvailable ? "teal" : "amber"}>
-              {report.historyAvailable ? t("common.active") : t("report.unavailable")}
+              {report.historyAvailable ? t("common.active") : t("report.historyBaselineInsufficientShort")}
             </Badge>
           </div>
+          {!report.historyAvailable && (
+            <div className="notice warn">{t("report.historyBaselineInsufficient")}</div>
+          )}
           {mode === "Weekly" && (
             <div className="weekly-report-grid">
               <div>
@@ -181,21 +193,21 @@ export function OperationsReportPage({ warehouse }: { warehouse: WarehouseCode }
                 <th>{t("report.inventoryDays")}</th>
               </tr></thead>
               <tbody><tr>
-                <td>{value(report.openingPhysical)}</td>
-                <td>{value(report.closingPhysical)}</td>
-                <td>{value(report.averagePhysical, 1)}</td>
-                <td>{value(report.frozenAwaitingPickup)}</td>
-                <td>{value(report.inTransit)}</td>
-                <td>{value(report.repairInventory)}</td>
-                <td>{value(report.operationalTurnover, 3)}</td>
-                <td>{value(report.inventoryDays, 1)}</td>
+                <td>{historicalValue(report.openingPhysical)}</td>
+                <td>{historicalValue(report.closingPhysical)}</td>
+                <td>{historicalValue(report.averagePhysical, 1)}</td>
+                <td>{historicalValue(report.frozenAwaitingPickup)}</td>
+                <td>{historicalValue(report.inTransit)}</td>
+                <td>{historicalValue(report.repairInventory)}</td>
+                <td>{historicalValue(report.operationalTurnover, 3)}</td>
+                <td>{historicalValue(report.inventoryDays, 1)}</td>
               </tr></tbody>
             </table>
           </div>
           <div className="area-metrics">
             <span>{t("report.floorArea")}: <strong>{report.areaConfigured ? `${value(report.warehouse.floorAreaSqm, 1)} m²` : t("report.areaNotConfigured")}</strong></span>
-            <span>{t("report.outboundDensity")}: <strong>{value(report.outboundDensity, 2)}</strong></span>
-            <span>{t("report.inventoryDensity")}: <strong>{value(report.inventoryDensity, 2)}</strong></span>
+            <span>{t("report.outboundDensity")}: <strong>{areaValue(report.outboundDensity, 2)}</strong></span>
+            <span>{t("report.inventoryDensity")}: <strong>{report.areaConfigured ? historicalValue(report.inventoryDensity, 2) : areaValue(undefined, 2)}</strong></span>
           </div>
         </section>
       ))}
@@ -219,16 +231,16 @@ export function OperationsReportPage({ warehouse }: { warehouse: WarehouseCode }
               </tr></thead>
               <tbody>{reports.map((report) => <tr key={report.warehouse.code}>
                 <td><strong>{report.warehouse.code}</strong></td>
-                <td>{value(report.averagePhysical, 1)}</td>
+                <td>{historicalValue(report.averagePhysical, 1)}</td>
                 <td>{value(report.inboundQty)}</td>
                 <td>{value(report.outboundQty)}</td>
-                <td>{value(report.frozenAwaitingPickup)}</td>
-                <td>{value(report.inTransit)}</td>
-                <td>{value(report.repairInventory)}</td>
-                <td>{value(report.operationalTurnover, 3)}</td>
-                <td>{value(report.inventoryDays, 1)}</td>
+                <td>{historicalValue(report.frozenAwaitingPickup)}</td>
+                <td>{historicalValue(report.inTransit)}</td>
+                <td>{historicalValue(report.repairInventory)}</td>
+                <td>{historicalValue(report.operationalTurnover, 3)}</td>
+                <td>{historicalValue(report.inventoryDays, 1)}</td>
                 <td>{report.areaConfigured ? value(report.warehouse.floorAreaSqm, 1) : t("report.areaNotConfigured")}</td>
-                <td>{value(report.outboundDensity, 2)}</td>
+                <td>{areaValue(report.outboundDensity, 2)}</td>
               </tr>)}</tbody>
             </table>
           </div>

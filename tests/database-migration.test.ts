@@ -23,6 +23,10 @@ describe("PostgreSQL integrity migrations", () => {
     path.join(process.cwd(), "prisma/migrations/20260729000000_sprint_2_2_integrity/migration.sql"),
     "utf8",
   );
+  const exceptionWarehouseScope = fs.readFileSync(
+    path.join(process.cwd(), "prisma/migrations/20260801000000_exception_warehouse_scope/migration.sql"),
+    "utf8",
+  );
 
   it("normalizes nullable relational dimensions in the logical balance key", () => {
     expect(initial).toContain('CREATE UNIQUE INDEX "InventoryBalance_relational_grain_key"');
@@ -59,5 +63,11 @@ describe("PostgreSQL integrity migrations", () => {
     expect(integrityPatch).toContain('ADD COLUMN "targetCondition"');
     expect(integrityPatch).toContain('ADD COLUMN "repairOutcome"');
     expect(integrityPatch).toContain('WHERE "transactionType" = \'Repair_Completed\'');
+  });
+
+  it("adds warehouse ownership for scoped operational exceptions", () => {
+    expect(exceptionWarehouseScope).toContain('ADD COLUMN "warehouseId"');
+    expect(exceptionWarehouseScope).toContain('CREATE INDEX "Exception_warehouseId_status_idx"');
+    expect(exceptionWarehouseScope).toContain('REFERENCES "Warehouse"("id")');
   });
 });

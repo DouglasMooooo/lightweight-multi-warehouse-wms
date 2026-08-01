@@ -12,3 +12,6 @@ generated/
 *.tsbuildinfo
 !.env.example
 tests/fixtures/private/
+
+.vercel/
+.env.local

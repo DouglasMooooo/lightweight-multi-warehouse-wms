@@ -216,6 +216,7 @@ export function WarehouseMapPage({ warehouse }: { warehouse: WarehouseCode }) {
         <div className="warehouse-map-toolbar">
           <div className="search-wrap map-search"><Search /><input id="warehouse-map-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("map.searchPlaceholder")} /></div>
           {floor && floorTotals && <div className="map-summary-strip">
+            <span><b>{t("map.inventoryScopeAll")}</b></span>
             <span><b>{floorTotals.physical}</b>{t("common.physical")}</span>
             <span><b>{floorTotals.physical - floorTotals.frozen}</b>{t("common.available")}</span>
             <span><b>{floorTotals.frozen}</b>{t("common.frozen")}</span>
@@ -338,7 +339,7 @@ function WarehouseFloorPlan({
             </g>
           );
         })}
-        <text className="floor-caption" x="26" y="440">SYD · OPERATIONAL FLOOR · NOT TO SCALE</text>
+        <text className="floor-caption" x="26" y="440">{t("map.floorCaption")}</text>
       </svg>
     </div>
   );
@@ -447,7 +448,7 @@ function RackElevation({
                       onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onSelect(location.code); }}
                       key={location.code}
                     >
-                      <title>{`${location.code}\n${location.skuCount > 1 ? `Mixed · ${location.skuCount} SKU` : `${location.primaryModel ?? "Empty"}\n${location.conditions.join(", ")}`}\nPhysical ${location.physicalQty} · Frozen ${location.frozenQty} · Available ${location.availableQty}`}</title>
+                      <title>{`${location.code}\n${location.skuCount > 1 ? `${t("map.tooltipMixed")} · ${location.skuCount} SKU` : `${location.primaryModel ?? t("map.tooltipEmpty")}\n${location.conditions.map((condition) => t(`status.${condition}`)).join(", ")}`}\n${t("map.tooltipPhysical")} ${location.physicalQty} · ${t("map.tooltipFrozen")} ${location.frozenQty} · ${t("map.tooltipAvailable")} ${location.availableQty}`}</title>
                       <rect x={x} y={y} width="43" height="58" rx="1" />
                       <text className="slot-side" x={x + 21.5} y={y + 19} textAnchor="middle">{side}</text>
                       <text className="slot-value" x={x + 21.5} y={y + 42} textAnchor="middle">

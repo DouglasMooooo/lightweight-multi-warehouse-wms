@@ -325,6 +325,7 @@ export async function seedDemo(prisma: PrismaClient, options: { skipReset?: bool
   });
   await prisma.exception.create({
     data: {
+      warehouseId: warehouses.SYD.id,
       type: "Serial reconciliation preview",
       severity: "Low",
       entityReference: balances[0].id,

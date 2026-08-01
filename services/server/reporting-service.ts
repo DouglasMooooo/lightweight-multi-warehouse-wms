@@ -8,6 +8,7 @@ import {
   mondayToSunday,
   operationalMovementMetrics,
   operationalOrderMetrics,
+  reconstructClosingPhysicalByCondition,
 } from "@/domain/reporting";
 import { getPrisma } from "@/lib/prisma";
 
@@ -61,7 +62,8 @@ export class OperationalReportingService {
       balances,
       movements,
       postPeriodDeltas,
-      historyBeforePeriod,
+      openingBaselineBeforePeriod,
+      postPeriodConditionMovements,
       openExceptions,
     ] = await Promise.all([
       this.prisma.warehouse.findUniqueOrThrow({ where: { id: warehouseId } }),
@@ -98,9 +100,20 @@ export class OperationalReportingService {
         _sum: { physicalDelta: true, frozenDelta: true, inTransitDelta: true },
       }),
       this.prisma.stockTransaction.count({
-        where: { warehouseId, effectiveAt: { lte: from } },
+        where: { warehouseId, transactionType: "Opening", effectiveAt: { lte: from } },
       }),
-      this.prisma.exception.count({ where: { status: { not: "Resolved" } } }),
+      this.prisma.stockTransaction.findMany({
+        where: { warehouseId, effectiveAt: { gt: to } },
+        select: {
+          transactionType: true,
+          condition: true,
+          sourceCondition: true,
+          targetCondition: true,
+          quantity: true,
+          physicalDelta: true,
+        },
+      }),
+      this.prisma.exception.count({ where: { warehouseId, status: { not: "Resolved" } } }),
     ]);
     const outbound = operationalOrderMetrics(
       orders.map((order) => ({
@@ -131,12 +144,14 @@ export class OperationalReportingService {
       from,
       to,
     );
-    const repairInventory = balances
-      .filter((row) => row.condition === "Repair")
-      .reduce((sum, row) => sum + Number(row.physicalQty), 0);
-    const newInventory = balances
-      .filter((row) => row.condition === "New")
-      .reduce((sum, row) => sum + Number(row.physicalQty), 0);
+    const currentPhysicalByCondition = Object.fromEntries(
+      ["New", "Repair_Good", "Repair", "Scrap", "Material"].map((condition) => [
+        condition,
+        balances
+          .filter((row) => row.condition === condition)
+          .reduce((sum, row) => sum + Number(row.physicalQty), 0),
+      ]),
+    );
     const currentPhysical = balances.reduce((sum, row) => sum + Number(row.physicalQty), 0);
     const currentFrozen = balances.reduce((sum, row) => sum + Number(row.frozenQty), 0);
     const currentInTransit = balances.reduce((sum, row) => sum + Number(row.inTransitQty), 0);
@@ -145,7 +160,20 @@ export class OperationalReportingService {
     const closingInTransit = currentInTransit - Number(postPeriodDeltas._sum.inTransitDelta ?? 0);
     const periodPhysicalDelta = movements.reduce((sum, row) => sum + Number(row.physicalDelta), 0);
     const openingPhysical = closingPhysical - periodPhysicalDelta;
-    const historyAvailable = historyBeforePeriod > 0;
+    const historyAvailable = openingBaselineBeforePeriod > 0;
+    const closingPhysicalByCondition = historyAvailable
+      ? reconstructClosingPhysicalByCondition(
+          currentPhysicalByCondition,
+          postPeriodConditionMovements.map((row) => ({
+            transactionType: row.transactionType,
+            condition: row.condition,
+            sourceCondition: row.sourceCondition,
+            targetCondition: row.targetCondition,
+            quantity: Number(row.quantity),
+            physicalDelta: Number(row.physicalDelta),
+          })),
+        )
+      : undefined;
     const periodDays = Math.max(1, Math.round((to.getTime() - from.getTime() + 1) / 86_400_000));
     const kpis = calculateOperationalKpis({
       openingPhysical: historyAvailable ? openingPhysical : undefined,
@@ -177,30 +205,22 @@ export class OperationalReportingService {
       pendingRepair: repairJobs.filter((row) =>
         ["Received", "Pending_Repair", "In_Repair"].includes(row.status),
       ).length,
-      repairInventory,
-      newInventory,
-      repairGoodInventory: balances
-        .filter((row) => row.condition === "Repair_Good")
-        .reduce((sum, row) => sum + Number(row.physicalQty), 0),
+      repairInventory: closingPhysicalByCondition?.Repair,
+      newInventory: closingPhysicalByCondition?.New,
+      repairGoodInventory: closingPhysicalByCondition?.Repair_Good,
       openingPhysical: historyAvailable ? openingPhysical : undefined,
       closingPhysical: historyAvailable ? closingPhysical : undefined,
       averagePhysical: kpis.averagePhysical,
-      frozenAwaitingPickup: closingFrozen,
-      inTransit: closingInTransit,
-      physicalByCondition: Object.fromEntries(
-        ["New", "Repair_Good", "Repair", "Scrap", "Material"].map((condition) => [
-          condition,
-          balances
-            .filter((row) => row.condition === condition)
-            .reduce((sum, row) => sum + Number(row.physicalQty), 0),
-        ]),
-      ),
+      frozenAwaitingPickup: historyAvailable ? closingFrozen : undefined,
+      inTransit: historyAvailable ? closingInTransit : undefined,
+      physicalByCondition: closingPhysicalByCondition,
       operationalTurnover: kpis.operationalTurnover,
       inventoryDays: kpis.inventoryDays,
       outboundDensity: kpis.outboundDensity,
       inventoryDensity: kpis.inventoryDensity,
       areaConfigured: kpis.areaConfigured,
       historyAvailable,
+      historyUnavailableReason: historyAvailable ? undefined : "HISTORICAL_BASELINE_INSUFFICIENT",
       openOperationalExceptions: openExceptions,
     };
   }

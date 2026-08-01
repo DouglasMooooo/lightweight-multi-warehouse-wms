@@ -33,3 +33,9 @@
 - Operator-facing outbound stages are presentation mappings: Imported/Pending Allocation/Allocated are To Prepare; Prepared/Ready for Pickup are Awaiting Pickup. Domain codes and ledger meaning do not change.
 - Scanner-based Transfer Out groups valid SNs by Product + Condition and posts one atomic transfer operation. Transfer receipt preserves condition and requires explicit destination physical location.
 - Label preview and printing are read-only output operations. Pickup Code produces one A4 batch label; missing Pickup Code falls back to SH No; Unit SN labels are explicit opt-in.
+- Operational exceptions belong to an explicit physical warehouse. Warehouse dashboards, maps, exception queues and reports exclude legacy unscoped exceptions rather than attributing them to an invented warehouse.
+- Historical closing Physical, Frozen, In Transit and condition balances are reported only when an Opening ledger baseline exists before the requested period. Condition balances are reconstructed by reversing later ledger deltas, including explicit Repair-to-target condition transitions.
+- When a historical opening baseline does not exist, the report returns no historical inventory value and presents `Historical closing inventory unavailable: insufficient opening ledger baseline`; current InventoryBalance must never be substituted.
+- Dashboard `Allocatable Product Stock` means Product inventory in New or Repair_Good less Frozen. Product Inventory Report `Physical Available Stock` means Physical less Frozen within its active item scope.
+- Warehouse Map defaults to all inventory units, including Product and Material. Product Inventory Report defaults to Product and must keep the selected item scope visible.
+- `DEMO-TRANSFER-001` is a non-production-only, synthetic fixture. Its four dedicated SNs may be used for destructive rehearsal; the fixture script must never reset an SN that has entered a workflow or touch operational stock.

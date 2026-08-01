@@ -702,7 +702,7 @@ function OutboundDetail({
                     >
                       <td className="mono strong">{candidate.sku}</td>
                       <td>{candidate.model}</td>
-                      <td><Badge>{candidate.requiredCondition}</Badge></td>
+                      <td><StatusBadge code={candidate.requiredCondition} /></td>
                       <td className="number strong">{candidate.requiredQty}</td>
                       <td className="number">{candidate.allocatedQty}</td>
                       <td className="number">{candidate.preparedQty}</td>
@@ -724,7 +724,7 @@ function OutboundDetail({
                   <div className="allocation-card" key={row.id}>
                     <div className="strong">{row.locationCode}</div>
                     <div className="subtle">
-                      {row.model} · {row.condition}
+                      {row.model} · {t(`status.${row.condition}`)}
                     </div>
                     <div className="allocation-meta">
                       <div>
@@ -884,7 +884,7 @@ function OutboundDetail({
             <div className="panel-body summary-list">
               <Summary label="SH" value={order.shNo} mono />
               <Summary label={t("summary.pickupCode")} value={order.pickupCode ?? t("outbound.pickupWhenPrepared")} mono />
-              <Summary label={t("summary.erpWarehouse")} value={order.erpWarehouse} />
+              <Summary label={t("summary.erpWarehouse")} value={order.erpWarehouse === "Unmapped" ? t("status.Unmapped") : order.erpWarehouse} />
               <Summary label={t("summary.physicalWarehouse")} value={order.warehouseCode} />
               <Summary label={t("summary.allocation")} value={line.allocationLocation ?? t("common.notAllocated")} />
               <Summary
@@ -895,7 +895,7 @@ function OutboundDetail({
                     : t("common.notAllocated")
                 }
               />
-              <Summary label={t("summary.erpSync")} value={order.erpSyncStatus} />
+              <Summary label={t("summary.erpSync")} value={<StatusBadge code={order.erpSyncStatus} />} />
             </div>
           </div>
           {line.preparedQty > 0 && (
@@ -1149,7 +1149,7 @@ function RepairView({
       <div className="split">
         <div className="panel">
           <div className="panel-head">
-            <h3>1 · Scan returned unit</h3>
+            <h3>{t("repair.scanReturnedStep")}</h3>
           </div>
           <div className="panel-body">
             <form className="scanner" onSubmit={lookup}>
@@ -1187,7 +1187,7 @@ function RepairView({
                   <Summary label="SKU" value={record.sku} mono />
                   <Summary label={t("common.model")} value={record.model} />
                   <Summary label={t("summary.originalOutbound")} value={record.originalOutboundDate} />
-                  <Summary label={t("summary.erpStatus")} value={record.erpStatus} />
+                  <Summary label={t("summary.erpStatus")} value={<StatusBadge code={record.erpStatus} />} />
                 </div>
                 <div className="form-actions">
                   <Button
@@ -1215,7 +1215,7 @@ function RepairView({
             <Summary label={t("summary.defaultLocation")} value="REPAIR-01" />
             <Summary label={t("summary.inventoryCondition")} value={<StatusBadge code="Repair" />} />
             <Summary label={t("summary.snStatus")} value={<StatusBadge code="Repair" />} />
-            <Summary label={t("summary.transaction")} value="Return_to_Repair" />
+            <Summary label={t("summary.transaction")} value={<StatusBadge code="Return_to_Repair" />} />
             <Summary label={t("summary.faultyReceipts")} value={state.faultyReceivedCount} />
           </div>
         </div>
@@ -1229,7 +1229,7 @@ function RepairView({
           {(state.repairJobs ?? []).map((job) => (
             <div className="allocation-card" key={job.id}>
               <div className="strong mono">{job.serialNumber ?? t("repair.unknownLegacySn")}</div>
-              <div className="subtle">{job.model} · {job.status} · {job.currentLocation}</div>
+              <div className="subtle">{job.model} · <StatusBadge code={job.status} /> · {job.currentLocation}</div>
               <Button
                 disabled={!["Received", "Pending_Repair"].includes(job.status)}
                 onClick={() =>
@@ -2142,7 +2142,7 @@ function LabelView({ order }: { order: OutboundOrder; state: WmsState }) {
             {label.lines.map((line) => (
               <div className="label-detail" key={`${line.sku}:${line.model}:${line.erpWarehouse}`}>
                 <span>{line.sku} · {line.model}</span>
-                <strong>{line.erpWarehouse} · Qty {line.qty}</strong>
+                <strong>{line.erpWarehouse === "Unmapped" ? t("status.Unmapped") : line.erpWarehouse} · {t("common.quantityShort")} {line.qty}</strong>
               </div>
             ))}
             <div className="label-total"><span>{t("label.totalQty")}</span><strong>{label.totalQty}</strong></div>

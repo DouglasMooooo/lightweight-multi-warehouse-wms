@@ -632,12 +632,14 @@ export class WmsApplicationService {
     return { ok: true, commandType: command.type, status: "Completed" };
   }
 
-  async lookupFaulty(serialNumber: string): Promise<ERPSerialLookup> {
+  async lookupFaulty(serialNumber: string, warehouseCode = "SYD"): Promise<ERPSerialLookup> {
     const normalized = serialNumber.trim().toUpperCase();
     const result = await this.erp.findBySerialNumber(normalized);
     if (result) return result;
+    const warehouse = await this.prisma.warehouse.findUniqueOrThrow({ where: { code: warehouseCode } });
     await this.prisma.exception.create({
       data: {
+        warehouseId: warehouse.id,
         type: "ERP lookup failure",
         severity: "Medium",
         entityReference: normalized,

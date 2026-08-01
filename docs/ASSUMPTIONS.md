@@ -109,3 +109,10 @@ Until explicit cutover approval, the workbook remains the production operational
 - Warehouse floor and operational area are optional nullable master-data fields. No Preview warehouse area was fabricated; area productivity reports `Area data not configured` until approved measurements are entered.
 - Operational Inventory Turnover is Outbound Units divided by Average Physical Inventory. It is an operational warehouse measure, not accounting inventory turnover.
 - Notification channel delivery remains future work. The Preview documents event boundaries but does not claim email, Teams or Kingdee production connectivity.
+
+## P0/P1 director-demo remediation
+
+- Existing Exception rows predate warehouse ownership and cannot be safely attributed after the fact. They remain nullable and are excluded from warehouse-scoped totals. New WMS-created exceptions carry `warehouseId`.
+- A reliable historical inventory report requires an Opening transaction before the requested period. If it is absent, the API returns unavailable fields and a reason code instead of current balances.
+- Post-period Repair completion is reversed with its explicit `sourceCondition` and `targetCondition`; ordinary post-period movements reverse their recorded `physicalDelta` at the transaction condition.
+- The dedicated transfer fixture uses only `DEMO-*` products, locations, references and SNs in a non-production database. It is installed explicitly and is never part of normal deploy, migration, seed or application startup.

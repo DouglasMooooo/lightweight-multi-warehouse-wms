@@ -26,6 +26,7 @@ export class WarehouseMapService {
     const exceptions = codes.length
       ? await this.prisma.exception.findMany({
           where: {
+            warehouseId: warehouse.id,
             status: { not: "Resolved" },
             entityReference: { in: codes },
           },
@@ -226,7 +227,11 @@ export class WarehouseMapService {
         take: 10,
       }),
       this.prisma.exception.findMany({
-        where: { entityReference: location.code, status: { not: "Resolved" } },
+        where: {
+          warehouseId: location.warehouseId,
+          entityReference: location.code,
+          status: { not: "Resolved" },
+        },
         orderBy: { createdAt: "desc" },
         take: 10,
       }),

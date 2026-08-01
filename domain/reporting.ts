@@ -17,6 +17,39 @@ export interface ReportingMovement {
   effectiveAt: string;
 }
 
+export interface HistoricalConditionMovement {
+  transactionType: string;
+  condition: string;
+  sourceCondition?: string | null;
+  targetCondition?: string | null;
+  quantity: number;
+  physicalDelta: number;
+}
+
+export function reconstructClosingPhysicalByCondition(
+  current: Record<string, number>,
+  postPeriodMovements: HistoricalConditionMovement[],
+) {
+  const closing = { ...current };
+  for (const movement of postPeriodMovements) {
+    if (
+      movement.transactionType === "Repair_Completed" &&
+      movement.sourceCondition &&
+      movement.targetCondition &&
+      movement.sourceCondition !== movement.targetCondition
+    ) {
+      closing[movement.targetCondition] =
+        (closing[movement.targetCondition] ?? 0) - movement.quantity;
+      closing[movement.sourceCondition] =
+        (closing[movement.sourceCondition] ?? 0) + movement.quantity;
+      continue;
+    }
+    closing[movement.condition] =
+      (closing[movement.condition] ?? 0) - movement.physicalDelta;
+  }
+  return closing;
+}
+
 export interface OperationalKpiInput {
   openingPhysical?: number;
   closingPhysical?: number;

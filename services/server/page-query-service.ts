@@ -57,7 +57,7 @@ export class PageQueryService {
         this.prisma.repairReturn.count({ where: { active: true, location: { warehouseId: warehouse.id } } }),
         this.prisma.repairJob.count({ where: { warehouseId: warehouse.id, status: { in: ["Received", "Pending_Repair", "In_Repair"] } } }),
         this.prisma.transferOrder.count({ where: { OR: [{ sourceWarehouseId: warehouse.id }, { destinationWarehouseId: warehouse.id }], status: { in: ["Dispatched", "In_Transit", "Partially_Received"] } } }),
-        this.prisma.exception.count({ where: { status: { not: "Resolved" } } }),
+        this.prisma.exception.count({ where: { warehouseId: warehouse.id, status: { not: "Resolved" } } }),
         this.prisma.eRPSyncJob.count({ where: { status: { in: ["Failed", "Manual_Review"] }, outboundOrder: { warehouseId: warehouse.id } } }),
         this.prisma.inventoryBalance.aggregate({
           where: { warehouseId: warehouse.id, itemType: "Product", condition: { in: ["New", "Repair_Good"] } },
@@ -410,7 +410,11 @@ export class PageQueryService {
       };
     }
     if (section === "exceptions") {
-      const rows = await this.prisma.exception.findMany({ orderBy: { createdAt: "desc" }, take: 100 });
+      const rows = await this.prisma.exception.findMany({
+        where: { warehouseId: warehouse.id },
+        orderBy: { createdAt: "desc" },
+        take: 100,
+      });
       return {
         ...base,
         exceptions: rows.map((row) => ({
