@@ -14,7 +14,7 @@ Remaining Preview limitations after the P0/P1 director-demo remediation.
 | P2 | Transfer receipt | Receipt is all-or-nothing; partial receipt policy is not exposed | Approve shortage, damage and partial receipt rules |
 | P2 | Notifications | Email, Teams and Kingdee notification delivery are not implemented | Select channels and define retry/escalation policy |
 | P2 | Review drafts | Outbound and transfer review drafts use browser local storage | Decide whether multi-workstation handoff needs server persistence |
-| P2 | Legacy outbound status | Existing shadow-import orders can have complete SN evidence but remain raw `Prepared` until explicitly reconciled | Run the guarded readiness audit/reconciliation only with approved Preview credentials; do not infer or fabricate SNs |
+| P2 | Legacy outbound status | Five shadow-import orders have complete SN counts but no matching InventoryBalance grain, so Frozen support is not auditable and they remain raw `Prepared` | Investigate workbook-to-balance grain evidence; do not infer a balance, fabricate SNs or promote the orders |
 | P3 | Activity map | Disabled because a reliable normalized activity metric is not approved | Define period, weighting and interpretation |
 
 ## Closed by this patch

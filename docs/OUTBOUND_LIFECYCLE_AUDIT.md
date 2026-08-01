@@ -39,3 +39,21 @@ This was a read-only browser audit of database-backed pages. No dispatch, prepar
 | ERP failed job | ERP Issue | Physical dispatch survives failed write-back | Retry / manual review |
 
 The correction does not require a database enum or migration. Existing complete legacy rows are not silently rewritten; the guarded audit tool can identify them for an explicitly approved reconciliation.
+
+## Controlled Preview reconciliation — 2026-08-02
+
+The guarded reconciliation ran against the existing Preview Neon database with `DATABASE_ENV=preview`. It required raw `Prepared` status, SYD warehouse and `Workbook migration evidence` provenance. DRY_RUN checked authoritative order/line/SN relations, all active prepared reservations at each InventoryBalance grain, duplicate active SN assignments and Frozen-to-Physical safety.
+
+Final verified Preview: `https://syd-wms-preview-5aq2vtnck-douglas-mos-projects.vercel.app/`
+
+- Candidates: 11
+- Eligible and promoted: 6 (`SH-2607-00161558`, `SH-2607-00168454`, `SH-2607-00170883`, `SH-2607-00175008`, `SH-2607-00175010`, `SH-2607-00175722`)
+- Blocked and unchanged: 5 (`SH-2607-00168887`, `SH-2607-00172594`, `SH-2607-00174080`, `SH-2607-00174586`, `SH-2607-00175011`)
+- Blocking reason for all five: the exact InventoryBalance grain was missing, so Frozen support could not be proven.
+- InventoryBalance snapshot: unchanged, including Physical, Frozen, In Transit and version.
+- ERP sync jobs created: 0
+- Dispatches: 0
+- Fabricated SNs: 0
+- Each promoted order received the normal `Outbound ready for pickup` audit record.
+
+A second APPLY run found only the same five blocked candidates, promoted zero orders and again left inventory and ERP jobs unchanged. This confirms the operation is idempotent.

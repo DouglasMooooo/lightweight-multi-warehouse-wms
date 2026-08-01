@@ -129,3 +129,5 @@ Domain and database codes are not translated.
 - Dispatch tests prove the server reuses preparation-assigned SN relations, posts Physical/Frozen and SN lifecycle changes, queues ERP write-back, and blocks incomplete authoritative evidence before ledger mutation.
 - Presentation tests prove raw `Prepared` maps to SN Pending and `Ready_for_Pickup` uses read-only SN evidence rather than ordinary pickup rescanning.
 - Preview audit was read-only: 11 raw `Prepared` orders, 12 serial-tracked lines and 18/18 assigned SN relations. No Preview data was modified.
+- Controlled Preview reconciliation DRY_RUN found six fully eligible orders and five blocked by missing InventoryBalance grains. Only the six eligible orders were promoted; the second APPLY promoted zero, proving idempotency.
+- The transaction compared every SYD InventoryBalance row before and after (Physical, Frozen, In Transit and version) and confirmed no change; ERP sync-job count also remained unchanged.
