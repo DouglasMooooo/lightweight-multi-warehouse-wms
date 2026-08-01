@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { reconstructClosingPhysicalByCondition } from "@/domain/reporting";
-import { translate } from "@/i18n/config";
+import { translate, translateAuditOperation, translateRole } from "@/i18n/config";
 
 describe("P0 historical inventory reporting", () => {
   it("reconstructs closing condition balances from post-period ledger deltas", () => {
@@ -52,12 +52,17 @@ describe("P0/P1 schema and presentation controls", () => {
   });
 
   it("provides explicit Simplified Chinese labels and unavailable reasons", () => {
-    expect(translate("zh-CN", "dashboard.availableUnits")).toBe("可出库产品库存");
+    expect(translate("zh-CN", "dashboard.availableUnits")).toBe("可出库良品库存");
+    expect(translate("zh-CN", "dashboard.availableUnitsHelp")).toBe("新品 + 维修良品 − 已冻结");
     expect(translate("zh-CN", "report.summary.available")).toBe("物理可用库存");
+    expect(translate("zh-CN", "report.summary.availableHelp")).toBe("产品实物库存 − 已冻结");
     expect(translate("zh-CN", "status.Not registered")).toBe("未登记");
     expect(translate("zh-CN", "status.Unmapped")).toBe("未映射");
     expect(translate("zh-CN", "report.historyBaselineInsufficientShort")).toContain("历史基线不足");
     expect(translate("zh-CN", "report.areaMetricUnavailable")).toContain("仓库面积未配置");
+    expect(translateAuditOperation("zh-CN", "Transfer Out")).toBe("调拨出库");
+    expect(translateAuditOperation("zh-CN", "Migrated demo transfer SN prefix")).toBe("迁移演示调拨 SN 前缀");
+    expect(translateRole("zh-CN", "Warehouse_Supervisor")).toBe("仓库主管");
   });
 
   it("keeps the transfer fixture explicit, non-production and non-destructive", () => {
@@ -68,6 +73,8 @@ describe("P0/P1 schema and presentation controls", () => {
     expect(fixture).toContain('ALLOW_DEMO_FIXTURE !== "true"');
     expect(fixture).toContain('DATABASE_ENV === "production"');
     expect(fixture).toContain("DEMO-TRANSFER-001");
+    expect(fixture).toContain("DEMO-TRANSFER-A-001");
+    expect(fixture).toContain("Net Physical Qty is unchanged");
     expect(fixture).not.toContain("deleteMany");
     expect(fixture).not.toContain("seedDemo");
   });

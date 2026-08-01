@@ -25,6 +25,7 @@ import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
 import type { Warehouse as WarehouseRecord, WarehouseCode } from "@/domain/types";
 import type { TranslationKey } from "@/i18n/config";
+import { translateRole } from "@/i18n/config";
 import { useI18n } from "@/i18n/provider";
 import { normalizeAppEnvironment, shouldShowEnvironmentBanner } from "@/lib/environment";
 import { formatWarehouseDateTime } from "@/lib/warehouse-time";
@@ -157,7 +158,7 @@ export function AppShell({
           </div>
         ))}
         <div className="sidebar-foot">
-          <div className="user-chip"><div className="avatar">{(currentUser?.displayName ?? t("common.warehouseUser")).split(/\s+/).map((part) => part[0]).join("").slice(0, 2)}</div><div><strong>{currentUser?.displayName ?? t("common.warehouseUser")}</strong><span>{currentUser?.role ?? t("common.viewer")}</span></div></div>
+          <div className="user-chip"><div className="avatar">{(currentUser?.displayName ?? t("common.warehouseUser")).split(/\s+/).map((part) => part[0]).join("").slice(0, 2)}</div><div><strong>{currentUser?.displayName ?? t("common.warehouseUser")}</strong><span>{currentUser?.role ? translateRole(locale, currentUser.role) : t("common.viewer")}</span></div></div>
         </div>
       </aside>
       <main className="main">

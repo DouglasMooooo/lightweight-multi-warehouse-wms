@@ -44,6 +44,7 @@ import { BatchTransferPanel } from "@/components/transfers/batch-transfer-panel"
 import { TransferReceiptPanel } from "@/components/transfers/transfer-receipt-panel";
 import { Button, cn, EmptyState as Empty, PageHeader as PageHead } from "@/components/shared/ui";
 import { useI18n } from "@/i18n/provider";
+import { translateAuditOperation } from "@/i18n/config";
 import { shouldShowDemoReset } from "@/lib/environment";
 import {
   beginScanSubmission,
@@ -1903,7 +1904,7 @@ function AuditRow({ row }: { row: AuditEntry }) {
   return (
     <tr>
       <td>{formatWarehouseDateTime(row.at, locale, "Australia/Sydney")}</td>
-      <td className="strong">{row.operation}</td>
+      <td className="strong">{translateAuditOperation(locale, row.operation)}</td>
       <td>{row.actor}</td>
       <td>
         {row.entityType}

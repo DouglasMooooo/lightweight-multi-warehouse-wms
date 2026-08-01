@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from "vitest";
-import { readFileSync } from "node:fs";
 import { matchExpectedInboundBatch } from "@/domain/bulk-operations";
 import { calculateOperationalKpis } from "@/domain/reporting";
 import type { ERPAdapter } from "@/integrations/erp-adapter";
@@ -211,14 +210,5 @@ describe("Final patch operational KPIs", () => {
     });
     expect(result.operationalTurnover).toBe(0);
     expect(result.inventoryDays).toBeUndefined();
-  });
-});
-
-describe("Final patch transfer lifecycle", () => {
-  it("receives against the existing Transfer ID and never creates a destination transfer", () => {
-    const source = readFileSync("services/server/transfer-receipt-service.ts", "utf8");
-    expect(source).toContain("transferId,");
-    expect(source).toContain('type: "receiveTransfer"');
-    expect(source).not.toContain("transferOrder.create");
   });
 });

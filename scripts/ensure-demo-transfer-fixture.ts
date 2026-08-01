@@ -8,14 +8,16 @@ const groups = [
     sku: "DEMO-SKU-TRANSFER-A",
     model: "DEMO TRANSFER UNIT A",
     condition: "New" as const,
-    serials: ["DEMO-TF-A-001", "DEMO-TF-A-002"],
+    serials: ["DEMO-TRANSFER-A-001", "DEMO-TRANSFER-A-002"],
+    legacySerials: ["DEMO-TF-A-001", "DEMO-TF-A-002"],
   },
   {
     sku: "DEMO-SKU-TRANSFER-B",
     model: "DEMO TRANSFER UNIT B",
     condition: "New" as const,
     previousCondition: "Repair_Good" as const,
-    serials: ["DEMO-TF-B-001", "DEMO-TF-B-002"],
+    serials: ["DEMO-TRANSFER-B-001", "DEMO-TRANSFER-B-002"],
+    legacySerials: ["DEMO-TF-B-001", "DEMO-TF-B-002"],
   },
 ] as const;
 
@@ -69,6 +71,7 @@ async function main() {
 
       let changed = false;
       let corrected = false;
+      let migratedLegacyIdentity = false;
       for (const group of groups) {
         const existingProduct = await tx.product.findUnique({ where: { sku: group.sku } });
         if (
@@ -216,6 +219,92 @@ async function main() {
           continue;
         }
 
+        const legacySerials = await tx.serialNumber.findMany({
+          where: { serialNumber: { in: [...group.legacySerials] } },
+        });
+        if (legacySerials.length) {
+          if (legacySerials.length !== group.legacySerials.length)
+            throw new Error(`${group.sku} legacy demo fixture is partial. No identity was changed.`);
+          const balance = await tx.inventoryBalance.findFirst({
+            where: {
+              warehouseId: sourceWarehouse.id,
+              locationId: sourceLocation.id,
+              containerId: null,
+              productId: product.id,
+              itemType: "Product",
+              condition: group.condition,
+            },
+          });
+          const safeLegacyIdentity = legacySerials.every((serial) =>
+            serial.productId === product.id &&
+            serial.currentWarehouseId === sourceWarehouse.id &&
+            serial.currentLocationId === sourceLocation.id &&
+            serial.condition === group.condition &&
+            serial.status === "In_Stock" &&
+            serial.sourceDocument === reference,
+          );
+          if (
+            !safeLegacyIdentity ||
+            !balance ||
+            !balance.physicalQty.equals(group.serials.length) ||
+            !balance.frozenQty.equals(0) ||
+            !balance.inTransitQty.equals(0)
+          ) throw new Error(`${group.sku} legacy demo identity is not safe to replace. No quantity or SN was changed.`);
+          await tx.serialNumber.updateMany({
+            where: { id: { in: legacySerials.map((serial) => serial.id) } },
+            data: { status: "Outbound", currentWarehouseId: null, currentLocationId: null },
+          });
+          await tx.serialNumber.createMany({
+            data: group.serials.map((serialNumber) => ({
+              serialNumber,
+              productId: product.id,
+              currentWarehouseId: sourceWarehouse.id,
+              currentLocationId: sourceLocation.id,
+              condition: group.condition,
+              status: "In_Stock" as const,
+              sourceDocument: reference,
+            })),
+          });
+          const identityOperationId = `${reference}-${group.sku}-IDENTITY-MIGRATION`;
+          await tx.stockTransaction.createMany({
+            data: [
+              {
+                transactionType: "Adjustment_Out",
+                warehouseId: sourceWarehouse.id,
+                sourceLocationId: sourceLocation.id,
+                productId: product.id,
+                itemType: "Product",
+                condition: group.condition,
+                quantity: group.serials.length,
+                physicalDelta: -group.serials.length,
+                businessReference: reference,
+                operationId: identityOperationId,
+                reason: "Retire legacy synthetic demo SN prefix",
+                remark: `Demo-only identity migration from ${group.legacySerials.join(", ")}. InventoryBalance is updated by the paired entry only.`,
+                createdById: actor.id,
+              },
+              {
+                transactionType: "Adjustment_In",
+                warehouseId: sourceWarehouse.id,
+                targetLocationId: sourceLocation.id,
+                productId: product.id,
+                itemType: "Product",
+                condition: group.condition,
+                quantity: group.serials.length,
+                physicalDelta: group.serials.length,
+                businessReference: reference,
+                operationId: identityOperationId,
+                reason: "Register approved synthetic demo SN prefix",
+                remark: `Demo-only identity migration to ${group.serials.join(", ")}. Net Physical Qty is unchanged.`,
+                createdById: actor.id,
+              },
+            ],
+          });
+          changed = true;
+          migratedLegacyIdentity = true;
+          continue;
+        }
+
         const balance = await tx.inventoryBalance.findFirst({
           where: {
             warehouseId: sourceWarehouse.id,
@@ -279,15 +368,15 @@ async function main() {
         await tx.auditLog.create({
           data: {
             userId: actor.id,
-            operation: corrected ? "Corrected demo transfer fixture" : "Prepared demo transfer fixture",
+            operation: migratedLegacyIdentity ? "Migrated demo transfer SN prefix" : corrected ? "Corrected demo transfer fixture" : "Prepared demo transfer fixture",
             entityType: "TransferDemoFixture",
             entityId: reference,
             businessReference: reference,
-            remark: "Ensured four synthetic New-condition SNs in two Product + Condition groups for SYD to MEL rehearsal.",
+            remark: "Ensured four DEMO-TRANSFER-* New-condition SNs in two Product + Condition groups for SYD to MEL rehearsal; no operational stock was used.",
           },
         });
       }
-      return { changed, corrected, reference, serials: groups.flatMap((group) => [...group.serials]) };
+      return { changed, corrected, migratedLegacyIdentity, reference, serials: groups.flatMap((group) => [...group.serials]) };
     }, { maxWait: 15_000, timeout: 30_000 });
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   } finally {

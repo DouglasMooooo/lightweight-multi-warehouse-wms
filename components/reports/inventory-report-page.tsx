@@ -190,7 +190,7 @@ export function InventoryReportPage({ warehouse }: { warehouse: WarehouseCode })
           ["repairGood", summary?.repairGoodQty ?? 0, PackageCheck],
           ["repair", summary?.repairQty ?? 0, AlertTriangle],
         ] as Array<[string, number, typeof Boxes]>).map(([key, value, Icon]) => (
-          <div key={String(key)}><Icon /><span>{t(`report.summary.${key}`)}</span><strong>{String(value)}</strong></div>
+          <div title={key === "available" ? t("report.summary.availableHelp") : undefined} key={String(key)}><Icon /><span>{t(`report.summary.${key}`)}</span><strong>{String(value)}</strong>{key === "available" && <small>{t("report.summary.availableHelp")}</small>}</div>
         ))}
       </div>
       <div className="report-controls">

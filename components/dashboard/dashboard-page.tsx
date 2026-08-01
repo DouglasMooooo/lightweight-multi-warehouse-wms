@@ -17,6 +17,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { WarehouseCode } from "@/domain/types";
 import { useI18n } from "@/i18n/provider";
+import { translateAuditOperation } from "@/i18n/config";
 import { formatWarehouseTime } from "@/lib/warehouse-time";
 import { PageHeader } from "@/components/shared/ui";
 
@@ -95,7 +96,7 @@ export function DashboardPage({ warehouse }: { warehouse: WarehouseCode }) {
         </div>
       </section>
       <div className="operational-strip">
-        <div><Boxes /><span>{t("dashboard.availableUnits")}</span><strong>{data.availableUnits}</strong></div>
+        <div title={t("dashboard.availableUnitsHelp")}><Boxes /><span className="kpi-label">{t("dashboard.availableUnits")}<small>{t("dashboard.availableUnitsHelp")}</small></span><strong>{data.availableUnits}</strong></div>
         <div><PackageCheck /><span>{t("dashboard.outboundToday")}</span><strong>{tasks.outboundToday}</strong></div>
         <div><PackagePlus /><span>{t("dashboard.inboundToday")}</span><strong>{data.inboundToday}</strong></div>
         <div><Wrench /><span>{t("dashboard.repairToday")}</span><strong>{data.repairToday}</strong></div>
@@ -112,7 +113,7 @@ export function DashboardPage({ warehouse }: { warehouse: WarehouseCode }) {
           <div className="section-heading compact"><div><span>{t("dashboard.activityKicker")}</span><h3>{t("dashboard.recentActivity")}</h3></div><Link className="subtle" href="/audit">{t("nav.audit")}</Link></div>
           <div className="timeline">
             {data.recentAudit.map((row) => (
-              <div className="timeline-item" key={row.id}><strong>{row.operation}</strong><p>{row.businessReference ?? row.entityType} · {formatWarehouseTime(row.at, locale, timeZone)}</p></div>
+              <div className="timeline-item" key={row.id}><strong>{translateAuditOperation(locale, row.operation)}</strong><p>{row.businessReference ?? row.entityType} · {formatWarehouseTime(row.at, locale, timeZone)}</p></div>
             ))}
           </div>
         </section>

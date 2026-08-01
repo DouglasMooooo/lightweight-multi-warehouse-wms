@@ -50,6 +50,52 @@ export function translateStatus(locale: Locale, domainCode: string) {
   return translate(locale, `status.${domainCode}`);
 }
 
+const auditOperationKeys: Record<string, string> = {
+  "Seeded PostgreSQL Preview": "audit.operation.seededPreview",
+  "Migrated demo transfer SN prefix": "audit.operation.migratedDemoTransfer",
+  "Corrected demo transfer fixture": "audit.operation.correctedDemoTransfer",
+  "Prepared demo transfer fixture": "audit.operation.preparedDemoTransfer",
+  "Created scanner transfer batch": "audit.operation.createdScannerTransfer",
+  "Bulk new stock inbound": "audit.operation.bulkNewInbound",
+  "Bulk faulty receiving": "audit.operation.bulkFaultyReceiving",
+  "Legacy Repair_Good recognition": "audit.operation.legacyRepairGood",
+  "Bulk serial registration": "audit.operation.bulkSerialRegistration",
+  "Bulk serial assignment": "audit.operation.bulkSerialAssignment",
+  "Confirmed outbound review preparation": "audit.operation.confirmedOutboundReview",
+  SHADOW_SEED: "audit.operation.shadowSeed",
+  "Generated pickup code": "audit.operation.generatedPickupCode",
+  "Imported replacement outbound": "audit.operation.importedReplacement",
+  "Allocated outbound": "audit.operation.allocatedOutbound",
+  "Prepared outbound": "audit.operation.preparedOutbound",
+  "Allocated outbound serial": "audit.operation.allocatedOutboundSerial",
+  "Confirmed outbound": "audit.operation.confirmedOutbound",
+  "Registered serial": "audit.operation.registeredSerial",
+  "Received faulty serial": "audit.operation.receivedFaultySerial",
+  "Completed repair": "audit.operation.completedRepair",
+  "Started repair": "audit.operation.startedRepair",
+  "Recognised legacy Repair_Good": "audit.operation.recognisedLegacyRepairGood",
+  "Moved stock": "audit.operation.movedStock",
+  "Transfer Out": "audit.operation.transferOut",
+  "Transfer In": "audit.operation.transferIn",
+};
+
+export function translateAuditOperation(locale: Locale, operation: string) {
+  const key = auditOperationKeys[operation];
+  return key ? translate(locale, key) : operation;
+}
+
+const roleKeys: Record<string, string> = {
+  Warehouse_Supervisor: "role.Warehouse_Supervisor",
+  Warehouse_Operator: "role.Warehouse_Operator",
+  Admin: "role.Admin",
+  Viewer: "role.Viewer",
+};
+
+export function translateRole(locale: Locale, role: string) {
+  const key = roleKeys[role];
+  return key ? translate(locale, key) : role;
+}
+
 export function translateError(locale: Locale, code: string | undefined, fallback?: string) {
   const key = code ? `error.${code}` : "error.UNKNOWN";
   const translated = messages[locale][key] ?? messages.en[key];
