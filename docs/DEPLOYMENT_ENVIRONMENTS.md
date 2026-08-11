@@ -19,6 +19,10 @@ Never copy production `DATABASE_URL` into a Preview environment. The metadata gu
 
 Vercel runs `prisma generate`, `prisma migrate deploy`, and `next build`. Normal deployment never runs a seed or reset command.
 
+For Production set both `NEXT_PUBLIC_DEMO_MODE=false` and `DEMO_MODE=false`. Runtime stock reads and writes use Prisma/PostgreSQL; the in-memory repository is not a production API dependency. Production requires an active audit user, while no service depends on the Demo Supervisor email.
+
+Sydney business-data cutover is separate from deployment and is never invoked by `vercel-build`. Follow [SYDNEY_PRODUCTION_CUTOVER.md](./SYDNEY_PRODUCTION_CUTOVER.md). A critical Dry Run exception blocks cutover even when schema deployment succeeds.
+
 `pnpm db:bootstrap-preview` remains an explicit manual tool for a completely empty, approved non-production database. It requires non-production environment metadata and `DEMO_MODE=true`, and it refuses to run when checked WMS tables contain data. It is not part of `vercel-build`.
 
 With Neon, Prisma migrations prefer `DATABASE_URL_UNPOOLED` to avoid advisory-lock problems through the connection pool. Application queries continue to use the pooled `DATABASE_URL`.

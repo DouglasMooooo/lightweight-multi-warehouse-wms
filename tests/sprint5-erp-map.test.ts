@@ -56,7 +56,7 @@ function fakeImportPrisma(input?: {
     return createdOrder;
   });
   const tx = {
-    user: { findUnique: vi.fn(async () => ({ id: "user-1", active: true, displayName: "Supervisor", role: { name: "Warehouse_Supervisor" } })) },
+    user: { findFirst: vi.fn(async () => ({ id: "user-1", active: true, displayName: "Supervisor", role: { name: "Warehouse_Supervisor" } })) },
     warehouse: {
       findFirstOrThrow: vi.fn(async () => ({ id: "warehouse-syd", code: "SYD" })),
     },

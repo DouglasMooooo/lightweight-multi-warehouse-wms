@@ -55,7 +55,7 @@ function atomicFixture(input: {
   let transactionOptions: any;
 
   const tx: any = {
-    user: { findUnique: vi.fn(async () => ({ id: "user-1", active: true })) },
+    user: { findFirst: vi.fn(async () => ({ id: "user-1", active: true })) },
     outboundOrderLine: {
       findUnique: vi.fn(async ({ where }: any) => lines.find((candidate) => candidate.id === where.id) ?? null),
       update: vi.fn(async ({ where, data }: any) => {

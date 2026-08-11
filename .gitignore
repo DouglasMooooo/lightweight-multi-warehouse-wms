@@ -12,6 +12,7 @@ generated/
 *.tsbuildinfo
 !.env.example
 tests/fixtures/private/
+/.cutover-input/
 
 .vercel/
 .env.local

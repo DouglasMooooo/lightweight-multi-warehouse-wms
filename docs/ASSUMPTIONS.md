@@ -73,6 +73,14 @@ Until explicit cutover approval, the workbook remains the production operational
 - `InventoryBalance` is the quantity authority for Product Inventory Report aggregation; the immutable ledger remains the reconciliation source.
 - Known SN coverage counts only the shared physically-present serial statuses. Allocatable status is intentionally stricter and is not substituted for physical presence.
 - Items with `serialTrackingRequired=false` display `Not tracked` and never create a serial coverage defect.
+
+## Sydney production cutover source conflicts (2026-08-12)
+
+- The authoritative Current Stock and SN snapshot exports do not currently pass the required cutover reconciliation. The migration does not guess or silently repair these values.
+- `FLEX-01 / 97-229-00021-00 / New` is Physical 7 / Frozen 1, while the snapshot contains 6 physically present SNs and 0 Prepared SNs.
+- `FLEX-01 / 30-132-50225-B0 / Repair_Good` is Physical 5 / Frozen 1, while the snapshot contains 4 physically present SNs and 0 Prepared SNs.
+- SN `60HG602R57MD009` points to SKU `30-132-60225-B0`, but Product Master classifies the SKU as `Material`. The importer will not change item type or SN condition without an authoritative correction.
+- These conflicts block production data apply. Full Dry Run evidence and the controlled rerun procedure are in `docs/SYDNEY_PRODUCTION_CUTOVER.md`.
 - `legacySerialGap` is shown separately and does not excuse a current balance or serial reconciliation failure.
 - Productless or unresolved balance rows cannot be placed in a SKU report without inventing product identity, so they remain reconciliation concerns rather than report rows.
 - CSV export applies the active server-side filters and exposes the same business quantities as the report.

@@ -44,6 +44,7 @@ export function normalizeCondition(value: WorkbookCellValue | undefined): StockC
   const aliases: Record<string, StockCondition> = {
     new: "New",
     新品: "New",
+    新机: "New",
     repair_good: "Repair_Good",
     repairgood: "Repair_Good",
     良品: "Repair_Good",

@@ -201,7 +201,7 @@ export class OutboundPreparationService {
 
   async confirm(input: ConfirmOutboundPreparationInput) {
     return serializable(this.prisma, async (tx) => {
-      const who = await tx.user.findUnique({ where: { email: "demo.supervisor@example.invalid" } });
+      const who = await tx.user.findFirst({ where: { active: true }, orderBy: { createdAt: "asc" } });
       if (!who?.active) throw new DomainError("No active server-side actor is configured.", "AUDIT_ACTOR_REQUIRED");
       const { line, location, serials } = await validateSerialIdentity(tx, input);
       if (!["Imported", "Pending_Allocation", "Partially_Prepared", "Allocated"].includes(line.outboundOrder.status))

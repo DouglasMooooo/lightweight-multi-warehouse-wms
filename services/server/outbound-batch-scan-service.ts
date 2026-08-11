@@ -35,9 +35,7 @@ export interface OutboundReviewResult {
 }
 
 async function actor(db: Prisma.TransactionClient) {
-  const user = await db.user.findUnique({
-    where: { email: "demo.supervisor@example.invalid" },
-  });
+  const user = await db.user.findFirst({ where: { active: true }, orderBy: { createdAt: "asc" } });
   if (!user?.active) throw new DomainError("No active server-side actor is configured.", "AUDIT_ACTOR_REQUIRED");
   return user;
 }

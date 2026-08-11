@@ -99,9 +99,10 @@ async function serializable<T>(prisma: PrismaClient, work: (tx: Tx) => Promise<T
 }
 
 async function actor(tx: Tx): Promise<Actor> {
-  const user = await tx.user.findUnique({
-    where: { email: "demo.supervisor@example.invalid" },
+  const user = await tx.user.findFirst({
+    where: { active: true },
     include: { role: true },
+    orderBy: { createdAt: "asc" },
   });
   if (!user || !user.active) throw new DomainError("No active server-side actor is configured.");
   return { id: user.id, displayName: user.displayName, role: user.role.name };

@@ -260,7 +260,7 @@ function dispatchPrisma({ complete = true } = {}) {
   };
   const balance: any = { id: "balance-1", physicalQty: d(1), frozenQty: d(1), inTransitQty: d(0) };
   const tx: any = {
-    user: { findUnique: vi.fn(async () => ({ id: "user-1", active: true, displayName: "Demo", role: { name: "Warehouse Supervisor" } })) },
+    user: { findFirst: vi.fn(async () => ({ id: "user-1", active: true, displayName: "Demo", role: { name: "Warehouse Supervisor" } })) },
     outboundOrder: {
       findUnique: vi.fn(async () => order),
       update: vi.fn(async ({ data }: any) => (Object.assign(order, data), order)),

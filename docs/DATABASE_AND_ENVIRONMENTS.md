@@ -2,7 +2,7 @@
 
 ## Current Decision
 
-The current Neon Sydney database remains the **Internal Preview / Prototype Database** for this release.
+The current Neon Sydney database remains the **Internal Preview / Prototype Database** and must not be reused as Production. Production uses a separately scoped PostgreSQL database and the same Prisma-backed application runtime.
 
 It is reused because it:
 
@@ -59,9 +59,11 @@ Uses:
 
 The UI clearly identifies this environment as non-production.
 
-### Future Production
+### Production Cutover Target
 
-Not implemented in this release. It will require a dedicated production database, production ERP credentials, SSO/RBAC, monitoring, backup/recovery, formal migration controls, audit policy, security review and UAT sign-off.
+Production database wiring and the guarded Sydney opening-import tooling are implemented. The live cutover is currently blocked by the critical authoritative-source reconciliation items recorded in `docs/SYDNEY_PRODUCTION_CUTOVER.md`. Production ERP remains `mock` for this release as explicitly scoped; this must be visible operationally and must not be described as a live Kingdee integration.
+
+A dedicated production database, backups/recovery, formal access provisioning, monitoring, security review and business sign-off remain deployment prerequisites.
 
 ## Migration and Seed Policy
 
@@ -123,7 +125,7 @@ Safety controls such as `DEMO_MODE`, shadow import and replacement flags should 
 - Authentication and data-access controls are prototype-level.
 - The database must not be assumed to contain official financial inventory.
 
-## Future Database Architecture
+## Target Database Architecture
 
 When the product advances beyond internal Preview:
 
@@ -136,9 +138,9 @@ flowchart TB
 
 Credentials, environment metadata and data lifecycles must be isolated. A Preview deployment must never connect to the production database.
 
-## Future Migration and Cutover
+## Controlled Migration and Cutover
 
-The Preview database must not be copied blindly into production. A future controlled migration should:
+The Preview database must not be copied blindly into production. The controlled migration must:
 
 1. freeze Product Master mapping;
 2. freeze Location Master;
