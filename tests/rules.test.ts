@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { DomainError } from "@/domain/errors";
 import {
   applyBalanceDelta,
   assertFaultyReceiptAllowed,
@@ -8,6 +9,13 @@ import {
   validateOutboundSerial,
   validatePreparation,
 } from "@/domain/rules";
+import {
+  assertSerialRegistrationCapacity,
+  isAllocatableStockCondition,
+  isAllocatableSerialStatus,
+  isPhysicallyPresentSerialStatus,
+  registeredSerialStatusForCondition,
+} from "@/domain/serial-policy";
 
 describe("Prepared and shared balance rules", () => {
   it("keeps physical unchanged, increases frozen and decreases available", () => {
@@ -62,6 +70,15 @@ describe("strict outbound serial validation", () => {
     expect(() => validateOutboundSerial({ ...valid, serialWarehouse: "MEL" })).toThrow("outbound warehouse"));
   it("rejects wrong location", () =>
     expect(() => validateOutboundSerial({ ...valid, serialLocation: "REPAIR-01" })).toThrow("allocated location"));
+  it("returns a stable code for operator-facing validation", () => {
+    try {
+      validateOutboundSerial({ ...valid, serialLocation: "REPAIR-01" });
+      throw new Error("Expected validation to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(DomainError);
+      expect((error as DomainError).code).toBe("SN_WRONG_LOCATION");
+    }
+  });
   it("rejects an already prepared serial", () =>
     expect(() => validateOutboundSerial({ ...valid, status: "Prepared" })).toThrow("another active order"));
 });
@@ -137,5 +154,53 @@ describe("pickup codes", () => {
     expect(new Set(codes).size).toBe(100);
     expect(codes[0]).toBe("SYD-00001");
     expect(formatPickupCode("MEL", 42)).toBe("MEL-00042");
+  });
+});
+
+describe("serial physical-presence policy", () => {
+  it("counts In_Stock, Prepared, Repair and Scrapped as physically present", () => {
+    expect(
+      ["In_Stock", "Prepared", "Repair", "Scrapped"].every((status) =>
+        isPhysicallyPresentSerialStatus(
+          status as "In_Stock" | "Prepared" | "Repair" | "Scrapped",
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      ["Outbound", "In_Transit"].some((status) =>
+        isPhysicallyPresentSerialStatus(status as "Outbound" | "In_Transit"),
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects registration when all physical units already have serial identities", () => {
+    expect(() =>
+      assertSerialRegistrationCapacity({
+        serialTrackingRequired: true,
+        physicalQty: 2,
+        activePhysicalSerialCount: 2,
+      }),
+    ).toThrowError(
+      expect.objectContaining({ code: "NO_UNASSIGNED_PHYSICAL_UNIT_FOR_SN" }),
+    );
+  });
+
+  it("keeps Repair and Scrap non-allocatable", () => {
+    expect(isAllocatableStockCondition("New")).toBe(true);
+    expect(isAllocatableStockCondition("Repair_Good")).toBe(true);
+    expect(isAllocatableStockCondition("Repair")).toBe(false);
+    expect(isAllocatableStockCondition("Scrap")).toBe(false);
+    expect(isAllocatableSerialStatus("In_Stock", "New")).toBe(true);
+    expect(isAllocatableSerialStatus("In_Stock", "Repair_Good")).toBe(true);
+    expect(isAllocatableSerialStatus("Prepared", "New")).toBe(false);
+    expect(isAllocatableSerialStatus("Repair", "Repair")).toBe(false);
+    expect(isAllocatableSerialStatus("Scrapped", "Scrap")).toBe(false);
+  });
+
+  it("registers Repair identity as Repair and rejects Scrap registration", () => {
+    expect(registeredSerialStatusForCondition("Repair")).toBe("Repair");
+    expect(() => registeredSerialStatusForCondition("Scrap")).toThrowError(
+      expect.objectContaining({ code: "INVALID_SERIAL_REGISTRATION_CONDITION" }),
+    );
   });
 });

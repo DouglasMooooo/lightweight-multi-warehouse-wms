@@ -1,0 +1,277 @@
+import "server-only";
+
+import { Prisma, type PrismaClient } from "@/generated/prisma/client";
+import { deriveWarehouseLocationState } from "@/domain/warehouse-map";
+import { getPrisma } from "@/lib/prisma";
+import { sydWarehouseLayout, sydneyAreaForLocation } from "@/warehouse-layouts/syd";
+
+const number = (value: Prisma.Decimal) => value.toNumber();
+
+export class WarehouseMapService {
+  constructor(private readonly prisma: PrismaClient = getPrisma()) {}
+
+  async map(warehouseCode: string, query = "") {
+    const warehouse = await this.prisma.warehouse.findUniqueOrThrow({ where: { code: warehouseCode } });
+    const locations = await this.prisma.location.findMany({
+      where: { warehouseId: warehouse.id, active: true },
+      include: {
+        balances: {
+          where: { physicalQty: { gt: 0 } },
+          include: { product: true, container: true },
+        },
+      },
+      orderBy: { code: "asc" },
+    });
+    const codes = locations.map((location) => location.code);
+    const exceptions = codes.length
+      ? await this.prisma.exception.findMany({
+          where: {
+            warehouseId: warehouse.id,
+            status: { not: "Resolved" },
+            entityReference: { in: codes },
+          },
+          select: { entityReference: true },
+        })
+      : [];
+    const exceptionCounts = new Map<string, number>();
+    for (const row of exceptions)
+      exceptionCounts.set(row.entityReference, (exceptionCounts.get(row.entityReference) ?? 0) + 1);
+
+    const rows = locations.map((location) => {
+      const skuSet = new Set(location.balances.flatMap((balance) => balance.product?.sku ? [balance.product.sku] : []));
+      const conditionSet = new Set(location.balances.map((balance) => balance.condition));
+      const containerSet = new Set(location.balances.flatMap((balance) => balance.container?.code ? [balance.container.code] : []));
+      const itemTypeSet = new Set(location.balances.map((balance) => balance.itemType));
+      const physicalQty = location.balances.reduce((sum, balance) => sum + number(balance.physicalQty), 0);
+      const frozenQty = location.balances.reduce((sum, balance) => sum + number(balance.frozenQty), 0);
+      const conditionCounts = location.balances.reduce<Record<string, number>>((result, balance) => {
+        result[balance.condition] = (result[balance.condition] ?? 0) + number(balance.physicalQty);
+        return result;
+      }, {});
+      const availableQty = physicalQty - frozenQty;
+      const exceptionCount = exceptionCounts.get(location.code) ?? 0;
+      const topBalance = [...location.balances].sort((a, b) => number(b.physicalQty) - number(a.physicalQty))[0];
+      return {
+        id: location.id,
+        code: location.code,
+        zone: location.zone,
+        rack: location.rack,
+        row: location.row,
+        bay: location.bay,
+        side: location.side,
+        serviceZone: location.serviceZone,
+        physicalQty,
+        frozenQty,
+        availableQty,
+        skuCount: skuSet.size,
+        conditions: [...conditionSet],
+        conditionCounts,
+        itemTypes: [...itemTypeSet],
+        containerCount: containerSet.size,
+        exceptionCount,
+        primarySku: topBalance?.product?.sku,
+        primaryModel: topBalance?.product?.model,
+        state: deriveWarehouseLocationState({
+          physicalQty,
+          frozenQty,
+          skuCount: skuSet.size,
+          conditions: [...conditionSet],
+          exceptionCount,
+        }),
+      };
+    });
+
+    const q = query.trim();
+    let matchingLocationCodes: string[] = [];
+    let serialMatchingLocationCodes: string[] = [];
+    if (q) {
+      const upper = q.toUpperCase();
+      const direct = rows.filter((row) =>
+        row.code.toUpperCase().includes(upper) ||
+        row.primarySku?.toUpperCase().includes(upper) ||
+        row.primaryModel?.toUpperCase().includes(upper),
+      ).map((row) => row.code);
+      const balanceMatches = await this.prisma.inventoryBalance.findMany({
+        where: {
+          warehouseId: warehouse.id,
+          physicalQty: { gt: 0 },
+          OR: [
+            { product: { sku: { contains: q, mode: "insensitive" } } },
+            { product: { model: { contains: q, mode: "insensitive" } } },
+            { container: { code: { contains: q, mode: "insensitive" } } },
+          ],
+        },
+        include: { location: true },
+        take: 100,
+      });
+      const serialMatches = await this.prisma.serialNumber.findMany({
+        where: {
+          currentWarehouseId: warehouse.id,
+          currentLocationId: { not: null },
+          serialNumber: { startsWith: upper },
+        },
+        include: { currentLocation: true },
+        take: 25,
+      });
+      serialMatchingLocationCodes = serialMatches.flatMap((serial) =>
+        serial.currentLocation?.code ? [serial.currentLocation.code] : [],
+      );
+      matchingLocationCodes = [...new Set([
+        ...direct,
+        ...balanceMatches.map((balance) => balance.location.code),
+        ...serialMatches.flatMap((serial) => serial.currentLocation?.code ? [serial.currentLocation.code] : []),
+      ])];
+    }
+
+    const summary = {
+      occupied: rows.filter((row) => row.state !== "Empty").length,
+      empty: rows.filter((row) => row.state === "Empty").length,
+      mixed: rows.filter((row) => row.state === "Mixed").length,
+      repair: rows.filter((row) => row.state === "Repair").length,
+      prepared: rows.filter((row) => row.frozenQty > 0).length,
+    };
+    return {
+      warehouse: { code: warehouse.code, name: warehouse.name, timezone: warehouse.timezone },
+      summary,
+      locations: rows,
+      matchingLocationCodes,
+      serialMatchingLocationCodes,
+    };
+  }
+
+  async floor(warehouseCode: string, query = "") {
+    const map = await this.map(warehouseCode, query);
+    const areas = sydWarehouseLayout.map((layout) => {
+      const locations = map.locations.filter((location) => sydneyAreaForLocation(location) === layout.id);
+      const matching = locations.filter((location) => map.matchingLocationCodes.includes(location.code));
+      return {
+        ...layout,
+        physicalQty: locations.reduce((sum, location) => sum + location.physicalQty, 0),
+        frozenQty: locations.reduce((sum, location) => sum + location.frozenQty, 0),
+        occupiedLocations: locations.filter((location) => location.physicalQty > 0).length,
+        locationCount: locations.length,
+        conditionCounts: locations.reduce<Record<string, number>>((result, location) => {
+          for (const [condition, quantity] of Object.entries(location.conditionCounts))
+            result[condition] = (result[condition] ?? 0) + quantity;
+          return result;
+        }, {}),
+        matchingLocationCodes: matching.map((location) => location.code),
+        matching: matching.length > 0,
+      };
+    });
+    const exactMatch = query
+      ? map.locations.find((location) =>
+          location.code.toUpperCase() === query.trim().toUpperCase() ||
+          map.serialMatchingLocationCodes.includes(location.code),
+        )
+      : undefined;
+    return {
+      warehouse: map.warehouse,
+      summary: map.summary,
+      areas,
+      query,
+      focusLocationCode: exactMatch?.code,
+      focusArea: exactMatch ? sydneyAreaForLocation(exactMatch) : undefined,
+    };
+  }
+
+  async rack(warehouseCode: string, rack: string, query = "") {
+    const map = await this.map(warehouseCode, query);
+    const locations = map.locations.filter((location) => location.rack?.toUpperCase() === rack.toUpperCase());
+    return {
+      warehouse: map.warehouse,
+      rack: rack.toUpperCase(),
+      locations,
+      matchingLocationCodes: map.matchingLocationCodes.filter((code) =>
+        locations.some((location) => location.code === code),
+      ),
+    };
+  }
+
+  async area(warehouseCode: string, area: string, query = "") {
+    const map = await this.map(warehouseCode, query);
+    const locations = map.locations.filter((location) => sydneyAreaForLocation(location) === area.toUpperCase());
+    return {
+      warehouse: map.warehouse,
+      rack: area.toUpperCase(),
+      locations,
+      matchingLocationCodes: map.matchingLocationCodes.filter((code) =>
+        locations.some((location) => location.code === code),
+      ),
+    };
+  }
+
+  async detail(warehouseCode: string, locationCode: string) {
+    const location = await this.prisma.location.findFirst({
+      where: { code: locationCode, warehouse: { code: warehouseCode }, active: true },
+      include: {
+        balances: {
+          include: { product: true, container: true },
+          orderBy: [{ product: { sku: "asc" } }, { condition: "asc" }],
+        },
+        warehouse: true,
+      },
+    });
+    if (!location) return null;
+    const [serialCount, movements, exceptions] = await Promise.all([
+      this.prisma.serialNumber.count({
+        where: { currentWarehouseId: location.warehouseId, currentLocationId: location.id },
+      }),
+      this.prisma.stockTransaction.findMany({
+        where: {
+          warehouseId: location.warehouseId,
+          OR: [{ sourceLocationId: location.id }, { targetLocationId: location.id }],
+        },
+        include: { product: true, sourceLocation: true, targetLocation: true },
+        orderBy: { effectiveAt: "desc" },
+        take: 10,
+      }),
+      this.prisma.exception.findMany({
+        where: {
+          warehouseId: location.warehouseId,
+          entityReference: location.code,
+          status: { not: "Resolved" },
+        },
+        orderBy: { createdAt: "desc" },
+        take: 10,
+      }),
+    ]);
+    return {
+      location: {
+        id: location.id,
+        code: location.code,
+        warehouseCode: location.warehouse.code,
+        zone: location.zone,
+        rack: location.rack,
+        row: location.row,
+        bay: location.bay,
+        side: location.side,
+        serviceZone: location.serviceZone,
+      },
+      inventory: location.balances.map((balance) => ({
+        id: balance.id,
+        sku: balance.product?.sku,
+        model: balance.product?.model ?? "Unmonitored material",
+        itemType: balance.itemType,
+        condition: balance.condition,
+        physicalQty: number(balance.physicalQty),
+        frozenQty: number(balance.frozenQty),
+        availableQty: number(balance.physicalQty.minus(balance.frozenQty)),
+        containerCode: balance.container?.code,
+      })),
+      serialCount,
+      exceptionCount: exceptions.length,
+      movements: movements.map((movement) => ({
+        id: movement.id,
+        operation: movement.transactionType,
+        sku: movement.product?.sku,
+        quantity: number(movement.quantity),
+        condition: movement.condition,
+        fromLocation: movement.sourceLocation?.code,
+        toLocation: movement.targetLocation?.code,
+        businessReference: movement.businessReference,
+        effectiveAt: movement.effectiveAt.toISOString(),
+      })),
+    };
+  }
+}

@@ -1,159 +1,71 @@
 "use client";
 
 import {
-  AlertTriangle,
   ArrowLeft,
   ArrowRight,
-  Boxes,
-  Check,
-  ClipboardCheck,
-  FileClock,
-  LayoutDashboard,
-  MapPin,
-  Menu,
   Move,
-  PackageCheck,
   PackageOpen,
   Plus,
   Printer,
-  RotateCcw,
   ScanLine,
   Search,
-  Settings,
-  ShieldAlert,
   SlidersHorizontal,
   Truck,
-  Warehouse,
   Wrench,
-  X,
 } from "lucide-react";
 import Link from "next/link";
-import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import type {
   AuditEntry,
   InventoryBalance,
   OutboundOrder,
   SerialNumber,
   StockCondition,
+  WarehouseCode,
   WmsState,
   WmsCommand,
 } from "@/domain/types";
 import type { ERPSerialLookup } from "@/integrations/erp-adapter";
+import { ReconciliationView } from "@/components/reconciliation-view";
+import { BulkSerialPage } from "@/components/bulk-serial-page";
+import { ERPHealthPanel } from "@/components/admin/erp-health-panel";
+import { DashboardPage } from "@/components/dashboard/dashboard-page";
+import { InventoryPage } from "@/components/inventory/inventory-page";
+import { InventoryReportPage } from "@/components/reports/inventory-report-page";
+import { OperationsReportPage } from "@/components/reports/operations-report-page";
+import { AppShell } from "@/components/layout/app-shell";
+import { ERPImportPanel } from "@/components/outbound/erp-import-panel";
+import { OutboundPreparationWorkspace } from "@/components/outbound/outbound-preparation-workspace";
+import { BatchLabelPreview } from "@/components/outbound/batch-label-preview";
+import { Badge, StatusBadge } from "@/components/shared/status-badge";
+import { WarehouseMapPage } from "@/components/warehouse-map/warehouse-map-page";
+import { BatchTransferPanel } from "@/components/transfers/batch-transfer-panel";
+import { TransferReceiptPanel } from "@/components/transfers/transfer-receipt-panel";
+import { Button, cn, EmptyState as Empty, PageHeader as PageHead } from "@/components/shared/ui";
+import { useI18n } from "@/i18n/provider";
+import { translateAuditOperation } from "@/i18n/config";
+import { shouldShowDemoReset } from "@/lib/environment";
+import { restoreScannerFocus } from "@/lib/scanner";
+import { formatWarehouseDateTime } from "@/lib/warehouse-time";
+import { outboundOperatorStage, outboundQueueFor, outboundSerialMode, type OutboundQueue } from "@/domain/outbound-presentation";
 
-const nav = [
-  {
-    label: "Operations",
-    items: [
-      ["/dashboard", "Dashboard", LayoutDashboard],
-      ["/inventory", "Current Stock", Boxes],
-      ["/outbound", "Outbound", PackageCheck],
-      ["/receiving", "Receiving", PackageOpen],
-      ["/repair", "Faulty Returns", Wrench],
-      ["/move", "Move Stock", Move],
-      ["/adjustment", "Adjust Stock", SlidersHorizontal],
-      ["/sn-search", "SN Search", ScanLine],
-      ["/transfers", "Transfers", Truck],
-      ["/stocktake", "Stocktake", ClipboardCheck],
-    ],
-  },
-  {
-    label: "Control",
-    items: [
-      ["/exceptions", "Exceptions", ShieldAlert],
-      ["/audit", "Audit Log", FileClock],
-    ],
-  },
-  {
-    label: "Administration",
-    items: [
-      ["/admin/products", "Products", Boxes],
-      ["/admin/locations", "Locations", MapPin],
-      ["/admin/warehouses", "Warehouses", Warehouse],
-      ["/admin/erp-mapping", "ERP Mapping", Settings],
-    ],
-  },
-] as const;
-
-const demoMode = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
-
-const routeTitles: Record<string, string> = {
-  dashboard: "Operations Dashboard",
-  inventory: "Current Stock",
-  outbound: "Outbound Orders",
-  receiving: "Receive Stock",
-  repair: "Faulty Unit Receiving",
-  move: "Move Stock",
-  adjustment: "Stock Adjustment",
-  "sn-search": "Serial Number Search",
-  transfers: "Inter-Warehouse Transfers",
-  stocktake: "Stocktake",
-  audit: "Audit Log",
-  exceptions: "Exceptions",
-  admin: "Master Data",
+const routeTitleKeys: Record<string, string> = {
+  dashboard: "title.dashboard", inventory: "title.inventory", outbound: "title.outbound",
+  receiving: "title.receiving", repair: "title.repair", move: "title.move",
+  adjustment: "title.adjustment", "sn-search": "title.snSearch", transfers: "title.transfers",
+  "bulk-sn": "title.bulkSn",
+  "warehouse-map": "title.warehouseMap",
+  reports: "title.inventoryReport",
+  stocktake: "title.stocktake", audit: "title.audit", exceptions: "title.exceptions",
+  reconciliation: "title.reconciliation", admin: "title.admin",
 };
 
-function cn(...values: Array<string | false | null | undefined>) {
-  return values.filter(Boolean).join(" ");
-}
-
-function statusTone(status: string) {
-  const normalized = status.toLowerCase();
-  if (normalized.includes("outbound") || normalized.includes("received") || normalized === "synced")
-    return "teal";
-  if (normalized.includes("exception") || normalized.includes("failed") || normalized.includes("critical"))
-    return "red";
-  if (normalized.includes("prepared") || normalized.includes("pickup") || normalized.includes("transit"))
-    return "amber";
-  return "blue";
-}
-
-function Badge({ children, tone }: { children: ReactNode; tone?: string }) {
-  return <span className={cn("badge dot", tone ?? statusTone(String(children)))}>{children}</span>;
-}
-
-function Button({
-  children,
-  className,
-  ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & { children: ReactNode }) {
-  return (
-    <button className={cn("btn", className)} {...props}>
-      {children}
-    </button>
-  );
-}
-
-function PageHead({
-  title,
-  subtitle,
-  actions,
-}: {
-  title: string;
-  subtitle: string;
-  actions?: ReactNode;
-}) {
-  return (
-    <div className="page-head">
-      <div>
-        <h2>{title}</h2>
-        <p>{subtitle}</p>
-      </div>
-      {actions && <div className="page-actions">{actions}</div>}
-    </div>
-  );
-}
-
-function Empty({ label }: { label: string }) {
-  return (
-    <div className="empty">
-      <PackageOpen />
-      <div>{label}</div>
-    </div>
-  );
-}
-
 export function WmsApp({ path }: { path: string[] }) {
+  const { t, error: friendlyError } = useI18n();
   const section = path[0] ?? "dashboard";
+  const detailId = path[1];
+  const subroute = path[2];
+  const isBatchLabelPreview = section === "outbound" && detailId === "batch-labels" && subroute === "preview";
   const [state, setState] = useState<WmsState | null>(null);
   const [ready, setReady] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -162,14 +74,31 @@ export function WmsApp({ path }: { path: string[] }) {
 
   useEffect(() => {
     let active = true;
-    fetch("/api/wms", { cache: "no-store" })
+    const operationsSections = ["receiving", "repair", "move", "adjustment", "transfers", "stocktake", "exceptions", "admin"];
+    const boundedPage =
+      ["dashboard", "inventory", "reports", "sn-search", "bulk-sn", "warehouse-map", "audit", "reconciliation"].includes(section) ||
+      (section === "outbound" && !detailId);
+    const readUrl =
+      isBatchLabelPreview
+        ? "/api/bootstrap"
+        : section === "outbound" && detailId && subroute !== "label"
+        ? `/api/outbound/${encodeURIComponent(detailId)}`
+        : operationsSections.includes(section)
+          ? `/api/operations?section=${encodeURIComponent(section)}&warehouse=${encodeURIComponent(warehouse)}`
+        : boundedPage
+          ? "/api/bootstrap"
+          : "/api/wms";
+    fetch(readUrl, { cache: "no-store" })
       .then(async (response) => {
-        const body = (await response.json()) as WmsState | { error: string };
-        if (!response.ok) throw new Error("error" in body ? body.error : "Unable to load warehouse data.");
+        const body = (await response.json()) as WmsState | { error: string; code?: string };
+        if (!response.ok) throw new Error(t("common.loadFailed"));
         if (active) setState(body as WmsState);
       })
-      .catch((error: unknown) => {
-        if (active) setToast({ message: error instanceof Error ? error.message : "Unable to load warehouse data.", error: true });
+      .catch(() => {
+        if (active) {
+          const message = t("common.loadFailed");
+          setToast({ message, error: true });
+        }
       })
       .finally(() => {
         if (active) setReady(true);
@@ -177,13 +106,29 @@ export function WmsApp({ path }: { path: string[] }) {
     return () => {
       active = false;
     };
-  }, []);
+  }, [detailId, friendlyError, isBatchLabelPreview, section, subroute, t, warehouse]);
 
   useEffect(() => {
     if (!toast) return;
     const timer = window.setTimeout(() => setToast(null), 4200);
     return () => window.clearTimeout(timer);
   }, [toast]);
+
+  async function refreshCurrent() {
+    const operationsSections = ["receiving", "repair", "move", "adjustment", "transfers", "stocktake", "exceptions", "admin"];
+    const refreshUrl =
+      section === "outbound" && detailId && subroute !== "label"
+        ? `/api/outbound/${encodeURIComponent(detailId)}`
+        : operationsSections.includes(section)
+          ? `/api/operations?section=${encodeURIComponent(section)}&warehouse=${encodeURIComponent(warehouse)}`
+        : ["dashboard", "inventory", "reports", "sn-search", "bulk-sn", "warehouse-map", "audit", "reconciliation"].includes(section) ||
+            (section === "outbound" && !detailId)
+          ? "/api/bootstrap"
+          : "/api/wms";
+    const refreshed = await fetch(refreshUrl, { cache: "no-store" });
+    if (!refreshed.ok) throw new Error(t("common.loadFailed"));
+    setState((await refreshed.json()) as WmsState);
+  }
 
   async function commit(command: WmsCommand, success: string) {
     try {
@@ -192,423 +137,283 @@ export function WmsApp({ path }: { path: string[] }) {
         headers: { "content-type": "application/json" },
         body: JSON.stringify(command),
       });
-      const body = (await response.json()) as WmsState | { error: string };
-      if (!response.ok) throw new Error("error" in body ? body.error : "Operation failed.");
-      setState(body as WmsState);
+      const body = (await response.json()) as { ok?: boolean; error?: string; code?: string };
+      if (!response.ok) throw new Error("error" in body ? friendlyError(body.code, body.error) : friendlyError());
+      await refreshCurrent();
       setToast({ message: success });
       return true;
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Operation failed.", error: true });
+      setToast({ message: error instanceof Error ? error.message : t("error.UNKNOWN"), error: true });
       return false;
     }
   }
 
   async function resetDemo() {
-    await commit({ type: "resetDemo" }, "Demo database restored to the validated starting state.");
+    await commit({ type: "resetDemo" }, t("success.demoReset"));
   }
 
-  if (!ready || !state) return <div className="empty">Loading database-backed warehouse data…</div>;
+  const title = t(
+    section === "reports" && path[1] === "operations"
+      ? "title.operationsReport"
+      : routeTitleKeys[section] ?? "app.name",
+  );
+  const demoMode = shouldShowDemoReset({
+    appEnv: process.env.NEXT_PUBLIC_APP_ENV,
+    demoMode: process.env.NEXT_PUBLIC_DEMO_MODE,
+  });
+  if (!ready)
+    return (
+      <AppShell
+        path={path}
+        title={title}
+        warehouses={[]}
+        warehouse={warehouse}
+        setWarehouse={setWarehouse}
+        sidebarOpen={sidebarOpen}
+        setSidebarOpen={setSidebarOpen}
+        showDemoReset={false}
+        onResetDemo={resetDemo}
+      >
+        <div className="page-loading"><div className="loading-bar" /><div>{t("common.loading")}</div></div>
+      </AppShell>
+    );
+  if (!state)
+    return (
+      <div className="startup-error" role="alert">
+        <strong>{t("common.loadFailed")}</strong>
+        <Button className="primary" onClick={() => window.location.reload()}>{t("common.retry")}</Button>
+      </div>
+    );
 
   if (section === "outbound" && path[2] === "label") {
     const order = state.outboundOrders.find((row) => row.id === path[1]);
-    return order ? <LabelView order={order} /> : <div className="empty">Order not found.</div>;
+    return order ? <LabelView order={order} state={state} /> : <div className="empty">{t("common.orderNotFound")}</div>;
   }
-
-  const title = routeTitles[section] ?? "Warehouse Operations";
+  if (isBatchLabelPreview) return <BatchLabelPreview />;
 
   return (
-    <div className="app-shell">
-      <aside className={cn("sidebar", sidebarOpen && "open")}>
-        <div className="brand">
-          <div className="brand-mark">FX</div>
-          <div>
-            <strong>Warehouse Ops</strong>
-            <span>Multi-warehouse Preview · v0.1</span>
-          </div>
-          {sidebarOpen && (
-            <Button className="ghost mobile-menu" onClick={() => setSidebarOpen(false)} aria-label="Close navigation">
-              <X />
-            </Button>
-          )}
-        </div>
-        {nav.map((group) => (
-          <div key={group.label}>
-            <div className="nav-label">{group.label}</div>
-            {group.items.map(([href, label, Icon]) => (
-              <Link
-                className={cn("nav-link", `/${path.join("/")}`.startsWith(href) && "active")}
-                href={href}
-                key={href}
-                onClick={() => setSidebarOpen(false)}
-              >
-                <Icon />
-                {label}
-              </Link>
-            ))}
-          </div>
-        ))}
-        <div className="sidebar-foot">
-          <div className="user-chip">
-            <div className="avatar">DS</div>
-            <div>
-              <strong>Demo Supervisor</strong>
-              <span>Warehouse_Supervisor</span>
-            </div>
-          </div>
-        </div>
-      </aside>
-      <main className="main">
-        <header className="topbar">
-          <div className="topbar-left">
-            <Button className="ghost mobile-menu" onClick={() => setSidebarOpen(true)} aria-label="Open navigation">
-              <Menu />
-            </Button>
-            <h1>{title}</h1>
-            <Badge tone="teal">Demo mode</Badge>
-          </div>
-          <div className="topbar-actions">
-            <select
-              className="warehouse-select"
-              aria-label="Active warehouse"
-              value={warehouse}
-              onChange={(event) => setWarehouse(event.target.value as typeof warehouse)}
-            >
-              {state.warehouses.map((row) => (
-                <option key={row.code} value={row.code}>
-                  {row.code} · {row.name}
-                </option>
-              ))}
-            </select>
-            {demoMode && (
-              <Button className="ghost" onClick={resetDemo} title="Reset demo data" aria-label="Reset demo data">
-                <RotateCcw />
-              </Button>
-            )}
-          </div>
-        </header>
-        <div className="content">
-          {section === "dashboard" && <Dashboard state={state} warehouse={warehouse} />}
-          {section === "inventory" && <InventoryView state={state} warehouse={warehouse} />}
+    <AppShell
+      path={path}
+      title={title}
+      warehouses={state.warehouses}
+      warehouse={warehouse}
+      setWarehouse={setWarehouse}
+      sidebarOpen={sidebarOpen}
+      setSidebarOpen={setSidebarOpen}
+      showDemoReset={demoMode}
+      onResetDemo={resetDemo}
+      toast={toast}
+      currentUser={state.currentUser}
+    >
+          {section === "dashboard" && <DashboardPage warehouse={warehouse} />}
+          {section === "inventory" && <InventoryPage warehouse={warehouse} />}
+          {section === "reports" && path[1] === "inventory" && <InventoryReportPage warehouse={warehouse} />}
+          {section === "reports" && path[1] === "operations" && <OperationsReportPage key={warehouse} warehouse={warehouse} />}
+          {section === "warehouse-map" && <WarehouseMapPage warehouse={warehouse} />}
           {section === "outbound" &&
             (path[1] ? (
-              <OutboundDetail state={state} orderId={path[1]} commit={commit} />
+              <OutboundDetail state={state} orderId={path[1]} commit={commit} refresh={refreshCurrent} />
             ) : (
-              <OutboundList state={state} warehouse={warehouse} />
+              <OutboundList state={state} warehouse={warehouse} refresh={refreshCurrent} />
             ))}
           {section === "receiving" && <ReceivingView state={state} commit={commit} />}
           {section === "repair" && <RepairView state={state} commit={commit} />}
           {section === "move" && <MoveView state={state} commit={commit} />}
           {section === "adjustment" && <AdjustmentView state={state} commit={commit} />}
           {section === "sn-search" && <SerialSearchView state={state} />}
-          {section === "transfers" && <TransferView state={state} commit={commit} />}
+          {section === "bulk-sn" && (
+            <BulkSerialPage warehouseCode={warehouse} />
+          )}
+          {section === "transfers" && <TransferView state={state} warehouse={warehouse} commit={commit} refresh={refreshCurrent} />}
           {section === "stocktake" && <StocktakeView state={state} warehouse={warehouse} />}
           {section === "audit" && <AuditView state={state} />}
           {section === "exceptions" && <ExceptionView state={state} />}
+          {section === "reconciliation" && (
+            <ReconciliationView warehouse={state.warehouses.find((row) => row.code === warehouse)!} />
+          )}
           {section === "admin" && <AdminView state={state} resource={path[1] ?? "products"} />}
-        </div>
-      </main>
-      {toast && (
-        <div className={cn("toast", toast.error && "error")}>
-          {toast.error ? <AlertTriangle /> : <Check />}
-          <span>{toast.message}</span>
-        </div>
-      )}
-    </div>
+    </AppShell>
   );
 }
 
-function Dashboard({ state, warehouse }: { state: WmsState; warehouse: "SYD" | "MEL" | "BNE" }) {
-  const rows = state.inventory.filter((row) => row.warehouseCode === warehouse);
-  const availableProduct = rows
-    .filter((row) => row.itemType === "Product" && ["New", "Repair_Good"].includes(row.condition))
-    .reduce((sum, row) => sum + row.availableQty, 0);
-  const frozen = rows.reduce((sum, row) => sum + row.frozenQty, 0);
-  const prepared = state.outboundOrders.filter((row) =>
-    ["Prepared", "Ready_for_Pickup", "Partially_Prepared"].includes(row.status),
-  ).length;
-  const inTransit = state.transfers.filter((row) => row.status === "In_Transit").length;
-  const locations = state.locations
-    .filter((row) => row.warehouseCode === warehouse)
-    .slice(0, 12)
-    .map((location) => ({
-      ...location,
-      stock: rows.filter((row) => row.locationCode === location.code && row.physicalQty > 0),
-    }));
-
-  const metrics = [
-    ["Available Product Inventory", availableProduct, "New + Repair Good"],
-    ["Frozen Inventory", frozen, "Prepared reservations"],
-    ["Prepared Orders", prepared, "Physical stock unchanged"],
-    ["Awaiting Pickup", state.outboundOrders.filter((row) => row.status === "Ready_for_Pickup").length, "Pickup code issued"],
-    ["Faulty Units Received", state.faultyReceivedCount, "This Preview period"],
-    ["Transfers In Transit", inTransit, "Between warehouses"],
-    ["Open Exceptions", state.exceptions.filter((row) => row.status !== "Resolved").length, "Requires attention"],
-  ];
-  const actions = [
-    ["/outbound", "Prepare orders", "Allocate and freeze stock", PackageCheck],
-    ["/receiving", "Receive stock", "Inbound and transfer receipt", PackageOpen],
-    ["/repair", "Receive faulty unit", "Scan SN and query ERP", Wrench],
-    ["/move", "Move stock", "Atomic location transfer", Move],
-    ["/adjustment", "Adjust stock", "Supervisor controlled", SlidersHorizontal],
-    ["/sn-search", "Search SN", "Trace complete history", ScanLine],
-    ["/stocktake", "Stocktake", "Count and reconcile", ClipboardCheck],
-    ["/exceptions", "Exceptions", "Investigate operational risks", ShieldAlert],
-  ] as const;
-
-  return (
-    <>
-      <PageHead
-        title={`${warehouse} warehouse at a glance`}
-        subtitle="Operational inventory, task queues and exceptions. Financial measures remain in ERP."
-        actions={
-          <Link className="btn primary" href="/outbound">
-            <Plus /> Prepare order
-          </Link>
-        }
-      />
-      <div className="grid metrics">
-        {metrics.map(([label, value, meta], index) => (
-          <div className={cn("metric", index === 6 && Number(value) > 0 && "alert")} key={label}>
-            <div className="metric-label">{label}</div>
-            <div className="metric-value">{value}</div>
-            <div className="metric-meta">{meta}</div>
-          </div>
-        ))}
-      </div>
-      <div className="grid dashboard-grid">
-        <div className="panel">
-          <div className="panel-head">
-            <h3>Warehouse tasks</h3>
-            <span className="subtle">Scanner-friendly shortcuts</span>
-          </div>
-          <div className="panel-body">
-            <div className="grid quick-actions">
-              {actions.map(([href, label, detail, Icon]) => (
-                <Link className="quick-action" href={href} key={href}>
-                  <Icon />
-                  <div>
-                    <strong>{label}</strong>
-                    <span>{detail}</span>
-                  </div>
-                </Link>
-              ))}
-            </div>
-          </div>
-        </div>
-        <div className="panel">
-          <div className="panel-head">
-            <h3>Recent activity</h3>
-            <Link className="subtle" href="/audit">
-              Full audit
-            </Link>
-          </div>
-          <div className="panel-body timeline">
-            {state.audit.slice(0, 5).map((row) => (
-              <div className="timeline-item" key={row.id}>
-                <strong>{row.operation}</strong>
-                <p>
-                  {row.businessReference ?? row.entityType} · {formatTime(row.at)}
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-      <div className="panel" style={{ marginTop: 16 }}>
-        <div className="panel-head">
-          <h3>Location pulse</h3>
-          <span className="subtle">Visual summary only · inventory remains the source of truth</span>
-        </div>
-        <div className="panel-body">
-          <div className="layout-grid">
-            {locations.map((location) => {
-              const total = location.stock.reduce((sum, row) => sum + row.physicalQty, 0);
-              return (
-                <div
-                  className={cn("location-tile", total > 0 && "occupied", location.serviceZone && "service")}
-                  key={location.id}
-                >
-                  <strong>{location.code}</strong>
-                  <span>{total > 0 ? `${location.stock.length} SKU · ${total} units` : "Empty"}</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-    </>
-  );
-}
-
-function InventoryView({ state, warehouse }: { state: WmsState; warehouse: "SYD" | "MEL" | "BNE" }) {
+function OutboundList({
+  state,
+  warehouse,
+  refresh,
+}: {
+  state: WmsState;
+  warehouse: "SYD" | "MEL" | "BNE";
+  refresh: () => Promise<void>;
+}) {
+  const { t } = useI18n();
   const [query, setQuery] = useState("");
-  const [condition, setCondition] = useState("All");
-  const [showRepair, setShowRepair] = useState(false);
-  const [showMaterial, setShowMaterial] = useState(false);
-  const [showZero, setShowZero] = useState(false);
-  const rows = state.inventory.filter((row) => {
-    const haystack = `${row.locationCode} ${row.containerCode ?? ""} ${row.sku ?? ""} ${row.model}`.toLowerCase();
-    return (
-      row.warehouseCode === warehouse &&
-      haystack.includes(query.toLowerCase()) &&
-      (condition === "All" || row.condition === condition) &&
-      (showZero || row.physicalQty !== 0) &&
-      (showRepair || row.condition !== "Repair") &&
-      (showMaterial || row.itemType !== "Material")
-    );
+  const [queue, setQueue] = useState<OutboundQueue>("To_Prepare");
+  const [page, setPage] = useState(1);
+  const [reloadToken, setReloadToken] = useState(0);
+  const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
+  const [outboundPage, setOutboundPage] = useState<{ rows: OutboundOrder[]; total: number; totalPages: number }>({
+    rows: state.outboundOrders,
+    total: state.outboundOrders.length,
+    totalPages: 1,
   });
-  return (
-    <>
-      <PageHead
-        title="Current stock"
-        subtitle="Database-shaped balances by warehouse, physical location, product, optional container and condition."
-        actions={
-          <>
-            <Link className="btn" href="/sn-search">
-              <ScanLine /> Search SN
-            </Link>
-            <Link className="btn primary" href="/receiving">
-              <Plus /> Receive stock
-            </Link>
-          </>
-        }
-      />
-      <div className="notice">
-        Available Qty = Physical Qty − Frozen Qty. Prepared inventory remains physically present and visible.
-      </div>
-      <div className="panel">
-        <div className="toolbar">
-          <div className="search-wrap">
-            <Search />
-            <input
-              placeholder="Search SKU, model, location or container"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-            />
-          </div>
-          <select value={condition} onChange={(event) => setCondition(event.target.value)}>
-            <option>All</option>
-            <option>New</option>
-            <option>Repair_Good</option>
-            <option>Repair</option>
-            <option>Material</option>
-          </select>
-          <label className="toggle">
-            <input type="checkbox" checked={showMaterial} onChange={(event) => setShowMaterial(event.target.checked)} />
-            Material
-          </label>
-          <label className="toggle">
-            <input type="checkbox" checked={showRepair} onChange={(event) => setShowRepair(event.target.checked)} />
-            Repair
-          </label>
-          <label className="toggle">
-            <input type="checkbox" checked={showZero} onChange={(event) => setShowZero(event.target.checked)} />
-            Zero stock
-          </label>
-        </div>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Warehouse</th>
-                <th>Location</th>
-                <th>Container</th>
-                <th>SKU</th>
-                <th>Model</th>
-                <th>Type</th>
-                <th>Condition</th>
-                <th className="number">Physical</th>
-                <th className="number">Frozen</th>
-                <th className="number">Available</th>
-                <th className="number">In Transit</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => (
-                <tr className={cn(row.availableQty < 0 && "anomaly", row.frozenQty > 0 && "frozen-row")} key={row.id}>
-                  <td>
-                    <Badge tone="blue">{row.warehouseCode}</Badge>
-                  </td>
-                  <td className="strong">{row.locationCode}</td>
-                  <td>{row.containerCode ? <span className="mono">{row.containerCode}</span> : "—"}</td>
-                  <td className="mono">{row.sku ?? "NO-SKU"}</td>
-                  <td>{row.model}</td>
-                  <td>{row.itemType}</td>
-                  <td>
-                    <Badge>{row.condition}</Badge>
-                  </td>
-                  <td className="number strong">{row.physicalQty}</td>
-                  <td className="number">{row.frozenQty}</td>
-                  <td className="number strong">{row.availableQty}</td>
-                  <td className="number">{row.inTransitQty}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {!rows.length && <Empty label="No inventory matches these filters." />}
-        </div>
-      </div>
-    </>
-  );
-}
-
-function OutboundList({ state, warehouse }: { state: WmsState; warehouse: "SYD" | "MEL" | "BNE" }) {
-  const [query, setQuery] = useState("");
-  const orders = state.outboundOrders.filter(
+  useEffect(() => {
+    const controller = new AbortController();
+    const params = new URLSearchParams({ page: String(page), pageSize: "50", warehouse });
+    params.set("status", queue);
+    fetch(`/api/outbound?${params}`, { cache: "no-store", signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(t("common.loadFailed"));
+        setOutboundPage(await response.json());
+        setSelectedOrderIds([]);
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [page, queue, reloadToken, t, warehouse]);
+  const orders = outboundPage.rows.filter(
     (order) =>
       order.warehouseCode === warehouse &&
+      outboundQueueFor(order.status, order.erpSyncStatus) === queue &&
       `${order.shNo} ${order.pickupCode ?? ""} ${order.lines.map((line) => line.sku).join(" ")}`
         .toLowerCase()
         .includes(query.toLowerCase()),
   );
+  const selectedOrders = outboundPage.rows.filter((order) => selectedOrderIds.includes(order.id));
+  const selectedPickupCodes = new Set(
+    selectedOrders.map((order) => order.pickupCode ? `PICKUP:${order.pickupCode}` : `SH:${order.shNo}`),
+  ).size;
+  const selectedUnits = selectedOrders.reduce(
+    (sum, order) => sum + order.lines.reduce((lineSum, line) => lineSum + line.requiredQty, 0),
+    0,
+  );
+  const awaitingPickup = queue === "Awaiting_Pickup";
+  const toggleOrder = (orderId: string) =>
+    setSelectedOrderIds((current) =>
+      current.includes(orderId) ? current.filter((id) => id !== orderId) : [...current, orderId],
+    );
   return (
     <>
       <PageHead
-        title="Outbound orders"
-        subtitle="Replacement fulfilment from ERP review through allocation, preparation, SN scan and dispatch."
+        title={t("title.outbound")}
+        subtitle={t("outbound.subtitle")}
       />
+      <ERPImportPanel onImported={async () => { await refresh(); setReloadToken((value) => value + 1); }} />
+      <div className="queue-tabs" role="tablist">
+        {[
+          ["To_Prepare", t("outbound.queue.toPrepare")],
+          ["Partially_Prepared", t("outbound.queue.partiallyPrepared")],
+          ["SN_Pending", t("outbound.queue.snPending")],
+          ["Awaiting_Pickup", t("outbound.queue.awaitingPickup")],
+          ["Outbound", t("outbound.queue.outbound")],
+          ["ERP_Issues", t("outbound.queue.erpIssues")],
+        ].map(([value, label]) => (
+          <button className={queue === value ? "active" : ""} key={value} onClick={() => {
+            setSelectedOrderIds([]);
+            setQueue(value as OutboundQueue);
+          }}>{label}</button>
+        ))}
+      </div>
       <div className="panel">
         <div className="toolbar">
           <div className="search-wrap">
             <Search />
             <input
-              placeholder="Search SH, pickup code or SKU"
+              placeholder={t("outbound.search")}
               value={query}
               onChange={(event) => setQuery(event.target.value)}
             />
           </div>
-          <Badge tone="amber">{orders.filter((row) => row.status !== "Outbound").length} active</Badge>
+          <Badge tone="amber">{t("outbound.active", { count: orders.filter((row) => row.status !== "Outbound").length })}</Badge>
         </div>
-        {orders.map((order) => {
-          const required = order.lines.reduce((sum, row) => sum + row.requiredQty, 0);
-          const prepared = order.lines.reduce((sum, row) => sum + row.preparedQty, 0);
-          return (
-            <div className="order-card" key={order.id}>
-              <div>
-                <div className="title mono">{order.shNo}</div>
-                <div className="subtle">{order.customerLabel}</div>
-              </div>
-              <div>
-                <span className="subtle">Pickup</span>
-                <div className="strong mono">{order.pickupCode ?? "Not generated"}</div>
-              </div>
-              <div>
-                <Badge>{order.status.replaceAll("_", " ")}</Badge>
-              </div>
-              <div>
-                <span className="subtle">
-                  Prepared {prepared}/{required}
-                </span>
-                <div className="progress">
-                  <span style={{ width: `${Math.min(100, (prepared / required) * 100)}%` }} />
-                </div>
-              </div>
-              <Link className="btn small" href={`/outbound/${order.id}`}>
-                Open <ArrowRight />
-              </Link>
+        {awaitingPickup && (
+          <div className="batch-selection-bar">
+            <Button type="button" onClick={() => setSelectedOrderIds(orders.map((order) => order.id))}>
+              {t("label.selectPage")}
+            </Button>
+            <Button type="button" onClick={() => setSelectedOrderIds(outboundPage.rows.map((order) => order.id))}>
+              {t("label.selectEligible")}
+            </Button>
+            <Button type="button" disabled={!selectedOrderIds.length} onClick={() => setSelectedOrderIds([])}>
+              {t("label.clearSelection")}
+            </Button>
+            <div className="batch-selection-summary">
+              <span>{t("label.selectedOrders")}: <strong>{selectedOrders.length}</strong></span>
+              <span>{t("label.pickupCodes")}: <strong>{selectedPickupCodes}</strong></span>
+              <span>{t("label.labelPages")}: <strong>{selectedPickupCodes}</strong></span>
+              <span>{t("label.totalUnits")}: <strong>{selectedUnits}</strong></span>
             </div>
-          );
-        })}
+            <Link
+              className={cn("btn primary", !selectedOrderIds.length && "disabled")}
+              aria-disabled={!selectedOrderIds.length}
+              href={selectedOrderIds.length
+                ? `/outbound/batch-labels/preview?orderIds=${encodeURIComponent(selectedOrderIds.join(","))}`
+                : "#"}
+            >
+              <Printer /> {t("label.generateBatch")}
+            </Link>
+          </div>
+        )}
+        <div className="table-wrap outbound-queue-table">
+          <table>
+            <thead><tr>
+              {awaitingPickup && <th className="selection-column"><span className="sr-only">{t("common.select")}</span></th>}
+              <th>SH / {t("summary.pickupCode")}</th>
+              <th>{t("outbound.skuSummary")}</th>
+              <th>{t("common.condition")}</th>
+              <th>{t("common.status")}</th>
+              <th>{t("outbound.progress")}</th>
+              <th>{t("outbound.nextAction")}</th>
+            </tr></thead>
+            <tbody>{orders.map((order) => {
+              const required = order.lines.reduce((sum, row) => sum + row.requiredQty, 0);
+              const prepared = order.lines.reduce((sum, row) => sum + row.preparedQty, 0);
+              const conditions = [...new Set(order.lines.map((line) => line.requiredCondition))];
+              const nextAction =
+                ["Imported", "Pending_Allocation", "Allocated", "Partially_Prepared"].includes(order.status) ? t("outbound.action.confirmPreparation") :
+                order.status === "Prepared" ? t("outbound.action.reviewLegacyException") :
+                order.status === "Ready_for_Pickup" ? t("outbound.action.dispatch") : t("common.open");
+              return (
+                <tr key={order.id}>
+                  {awaitingPickup && (
+                    <td className="selection-column">
+                      <input
+                        type="checkbox"
+                        aria-label={`${t("common.select")} ${order.shNo}`}
+                        checked={selectedOrderIds.includes(order.id)}
+                        onChange={() => toggleOrder(order.id)}
+                      />
+                    </td>
+                  )}
+                  <td><Link className="queue-identifier mono" href={`/outbound/${order.id}`}>{order.shNo}</Link><span className="queue-secondary mono">{order.pickupCode ?? t("outbound.pickupWhenPrepared")}</span></td>
+                  <td><strong>{order.lines.map((line) => line.sku).slice(0, 2).join(" · ")}</strong><span className="queue-secondary">{t("outbound.lineUnits", { lines: order.lines.length, units: required })}</span></td>
+                  <td><div className="status-stack">{conditions.map((condition) => <StatusBadge code={condition} key={condition} />)}</div></td>
+                  <td><StatusBadge code={order.status} label={t(`outbound.stage.${{
+                    TO_PREPARE: "toPrepare",
+                    PARTIALLY_PREPARED: "partiallyPrepared",
+                    SN_PENDING: "snPending",
+                    AWAITING_PICKUP: "awaitingPickup",
+                    OUTBOUND: "outbound",
+                    ERP_SYNCED: "erpSynced",
+                    ERP_ISSUE: "erpIssues",
+                  }[outboundOperatorStage(order.status, order.erpSyncStatus)]}`)} /></td>
+                  <td className="queue-progress"><strong>{prepared} / {required}</strong><div className="progress"><span style={{ width: `${required ? Math.min(100, (prepared / required) * 100) : 0}%` }} /></div></td>
+                  <td><Link className="btn small queue-action" href={`/outbound/${order.id}`}>{nextAction}<ArrowRight /></Link></td>
+                </tr>
+              );
+            })}</tbody>
+          </table>
+          {!orders.length && <Empty label={t("common.noResults")} />}
+        </div>
+      </div>
+      <div className="toolbar">
+        <span className="subtle">{t("common.rowsPage", { rows: outboundPage.total, page, pages: outboundPage.totalPages || 1 })}</span>
+        <Button type="button" disabled={page <= 1} onClick={() => {
+          setSelectedOrderIds([]);
+          setPage((value) => value - 1);
+        }}>{t("common.previous")}</Button>
+        <Button type="button" disabled={page >= outboundPage.totalPages} onClick={() => {
+          setSelectedOrderIds([]);
+          setPage((value) => value + 1);
+        }}>{t("common.next")}</Button>
       </div>
     </>
   );
@@ -618,15 +423,18 @@ function OutboundDetail({
   state,
   orderId,
   commit,
+  refresh,
 }: {
   state: WmsState;
   orderId: string;
   commit: (command: WmsCommand, success: string) => Promise<boolean>;
+  refresh: () => Promise<void>;
 }) {
+  const { t } = useI18n();
   const order = state.outboundOrders.find((row) => row.id === orderId);
-  const [scan, setScan] = useState("");
-  if (!order) return <Empty label="Outbound order not found." />;
-  const line = order.lines[0];
+  const [activeLineId, setActiveLineId] = useState(order?.lines.at(0)?.id ?? "");
+  const line = order?.lines.find((row) => row.id === activeLineId) ?? order?.lines.at(0);
+  if (!order || !line) return <Empty label={t("common.orderNotFound")} />;
   const candidates = state.inventory.filter(
     (row) =>
       row.warehouseCode === order.warehouseCode &&
@@ -635,202 +443,207 @@ function OutboundDetail({
       row.availableQty > 0,
   );
   const serialRequired = state.products.find((row) => row.sku === line.sku)?.serialTrackingRequired;
-  const activeOrderId = order.id;
-  const activeOrderShNo = order.shNo;
-  const activeLineId = line.id;
   const canDispatch =
+    order.status === "Ready_for_Pickup" &&
+    order.lines.every((candidate) => {
+      const requiresSerial = state.products.find((row) => row.sku === candidate.sku)?.serialTrackingRequired;
+      return candidate.preparedQty === candidate.requiredQty &&
+        (!requiresSerial || candidate.scannedSerials.length === candidate.requiredQty);
+    });
+  const allPrepared = order.lines.every((candidate) => candidate.preparedQty >= candidate.requiredQty);
+  const allSerialsComplete = order.lines.every((candidate) => {
+    const requiresSerial = state.products.find((row) => row.sku === candidate.sku)?.serialTrackingRequired;
+    return !requiresSerial || candidate.scannedSerials.length === candidate.requiredQty;
+  });
+  const serialMode = outboundSerialMode(order.status, allPrepared, allSerialsComplete);
+  const canUseAtomicPreparation =
+    ["Imported", "Pending_Allocation", "Partially_Prepared", "Allocated"].includes(order.status) &&
+    line.allocatedQty === 0 &&
+    line.preparedQty === 0 &&
+    line.allocations.length === 0;
+  const selectedLineComplete =
+    line.allocatedQty === line.requiredQty &&
     line.preparedQty === line.requiredQty &&
-    (!serialRequired || line.scannedSerials.length === line.requiredQty) &&
-    order.status !== "Outbound";
-  const step = order.status === "Outbound" ? 5 : line.scannedSerials.length === line.requiredQty ? 4 : line.preparedQty ? 3 : 1;
-
-  async function scanSerial(event: FormEvent) {
-    event.preventDefault();
-    if (!scan.trim()) return;
-    const accepted = await commit(
-      { type: "scanOutboundSerial", orderId: activeOrderId, lineId: activeLineId, serialNumber: scan.trim().toUpperCase() },
-      `Serial ${scan.trim().toUpperCase()} allocated to ${activeOrderShNo}.`,
-    );
-    if (accepted) setScan("");
-  }
+    (!serialRequired || line.scannedSerials.length === line.requiredQty);
+  const dispatched = ["Outbound", "ERP_Synced"].includes(order.status);
+  const readyForPickup = order.status === "Ready_for_Pickup" || dispatched;
+  const workflow = [
+    { key: "outbound.step.erpImported", complete: true },
+    { key: "outbound.step.toPrepare", complete: allPrepared && allSerialsComplete },
+    { key: "outbound.step.awaitingPickup", complete: readyForPickup },
+    { key: "outbound.step.outbound", complete: dispatched },
+  ];
+  const currentWorkflowIndex = workflow.findIndex((stage) => !stage.complete);
 
   return (
     <>
       <PageHead
         title={order.shNo}
-        subtitle="Replacement Unit Information is the outbound source. Faulty Unit Information is never used as the replacement SKU."
+        subtitle={t("outbound.subtitle")}
         actions={
           <>
             <Link className="btn" href="/outbound">
-              <ArrowLeft /> Orders
+              <ArrowLeft /> {t("outbound.orders")}
             </Link>
             <Link className="btn" href={`/outbound/${order.id}/label`}>
-              <Printer /> Print label
+              <Printer /> {t("label.print")}
             </Link>
             <Button
               className="primary"
               disabled={!canDispatch}
-              onClick={() =>
-                commit({ type: "dispatchOutbound", orderId: order.id }, `${order.shNo} dispatched; ERP sync queued.`)
-              }
+              onClick={() => {
+                const units = order.lines.reduce((sum, row) => sum + row.requiredQty, 0);
+                if (!window.confirm(t("outbound.confirmDispatchBody", {
+                  sh: order.shNo,
+                  pickup: order.pickupCode ?? "—",
+                  units,
+                }))) return;
+                commit({ type: "dispatchOutbound", orderId: order.id }, t("success.outboundDispatched", { sh: order.shNo }));
+              }}
             >
-              <Truck /> Confirm dispatch
+              <Truck /> {t("outbound.confirmDispatch")}
             </Button>
           </>
         }
       />
-      <div className="stepbar">
-        {["ERP order", "Allocated", "Prepared", "SN scanned", "Dispatched"].map((label, index) => (
-          <div className={cn("step", index + 1 <= step && "done")} key={label}>
-            {label}
+      <div className="stepbar outbound-workflow">
+        {workflow.map((stage, index) => (
+          <div className={cn("step", stage.complete && "done", index === currentWorkflowIndex && "current", currentWorkflowIndex >= 0 && index > currentWorkflowIndex && "blocked")} key={stage.key}>
+            <span>{index + 1}</span>{t(stage.key)}
           </div>
         ))}
       </div>
+      {serialMode === "READ_ONLY" && order.status === "Ready_for_Pickup" && (
+        <div className="panel">
+          <div className="panel-head">
+            <div>
+              <h3>{t("outbound.assignedSnEvidence")}</h3>
+              <span className="subtle">{t("outbound.assignedSnHelp")}</span>
+            </div>
+          </div>
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>SKU</th><th>{t("common.model")}</th><th>{t("bulk.assigned")}</th></tr></thead>
+              <tbody>{order.lines.map((candidate) => (
+                <tr key={candidate.id}>
+                  <td className="mono strong">{candidate.sku}</td>
+                  <td>{candidate.model}</td>
+                  <td><div className="serial-chips">{candidate.scannedSerials.map((serial) => (
+                    <span className="serial-chip" key={serial}>{serial}</span>
+                  ))}{!candidate.scannedSerials.length && <span className="subtle">{t("common.notRequired")}</span>}</div></td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        </div>
+      )}
       <div className="split">
         <div className="grid">
           <div className="panel">
             <div className="panel-head">
-              <h3>Requested line</h3>
-              <Badge>{order.status.replaceAll("_", " ")}</Badge>
+              <h3>{t("outbound.requestedLine")}</h3>
+              <StatusBadge code={order.status} label={t(`outbound.stage.${{
+                TO_PREPARE: "toPrepare",
+                PARTIALLY_PREPARED: "partiallyPrepared",
+                SN_PENDING: "snPending",
+                AWAITING_PICKUP: "awaitingPickup",
+                OUTBOUND: "outbound",
+                ERP_SYNCED: "erpSynced",
+                ERP_ISSUE: "erpIssues",
+              }[outboundOperatorStage(order.status, order.erpSyncStatus)]}`)} />
             </div>
             <div className="table-wrap">
               <table>
                 <thead>
                   <tr>
                     <th>SKU</th>
-                    <th>Model</th>
-                    <th>Condition</th>
-                    <th className="number">Required</th>
-                    <th className="number">Allocated</th>
-                    <th className="number">Prepared</th>
-                    <th className="number">Dispatched</th>
+                    <th>{t("common.model")}</th>
+                    <th>{t("common.condition")}</th>
+                    <th className="number">{t("common.required")}</th>
+                    <th className="number">{t("common.allocated")}</th>
+                    <th className="number">{t("common.prepared")}</th>
+                    <th className="number">{t("common.dispatched")}</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr>
-                    <td className="mono strong">{line.sku}</td>
-                    <td>{line.model}</td>
-                    <td>
-                      <Badge>{line.requiredCondition}</Badge>
-                    </td>
-                    <td className="number strong">{line.requiredQty}</td>
-                    <td className="number">{line.allocatedQty}</td>
-                    <td className="number">{line.preparedQty}</td>
-                    <td className="number">{line.dispatchedQty}</td>
-                  </tr>
+                  {order.lines.map((candidate) => (
+                    <tr
+                      key={candidate.id}
+                      className={candidate.id === line.id ? "selected-row" : ""}
+                      onClick={() => setActiveLineId(candidate.id)}
+                    >
+                      <td className="mono strong">{candidate.sku}</td>
+                      <td>{candidate.model}</td>
+                      <td><StatusBadge code={candidate.requiredCondition} /></td>
+                      <td className="number strong">{candidate.requiredQty}</td>
+                      <td className="number">{candidate.allocatedQty}</td>
+                      <td className="number">{candidate.preparedQty}</td>
+                      <td className="number">{candidate.dispatchedQty}</td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
           </div>
-          {line.preparedQty < line.requiredQty && (
+          {canUseAtomicPreparation && (
+            <OutboundPreparationWorkspace
+              order={order}
+              line={line}
+              candidates={candidates}
+              serialTrackingRequired={Boolean(serialRequired)}
+              onConfirmed={refresh}
+            />
+          )}
+          {selectedLineComplete && !["Ready_for_Pickup", "Outbound", "ERP_Synced"].includes(order.status) && (
             <div className="panel">
               <div className="panel-head">
-                <h3>Eligible inventory</h3>
-                <span className="subtle">Only available stock matching condition</span>
+                <div>
+                  <h3>{t("outbound.linePreparationCompleted")}</h3>
+                  <span className="subtle">{t("outbound.linePreparationCompletedHelp")}</span>
+                </div>
+                <PackageOpen />
               </div>
-              <div className="panel-body grid">
-                {candidates.map((row) => (
-                  <div className="allocation-card" key={row.id}>
-                    <div className="strong">{row.locationCode}</div>
-                    <div className="subtle">
-                      {row.model} · {row.condition}
-                    </div>
-                    <div className="allocation-meta">
-                      <div>
-                        <span>Physical</span>
-                        <strong>{row.physicalQty}</strong>
-                      </div>
-                      <div>
-                        <span>Frozen</span>
-                        <strong>{row.frozenQty}</strong>
-                      </div>
-                      <div>
-                        <span>Available</span>
-                        <strong>{row.availableQty}</strong>
-                      </div>
-                    </div>
-                    <Button
-                      className="primary"
-                      onClick={() =>
-                        commit(
-                          {
-                            type: "prepareOutbound",
-                            orderId: order.id,
-                            lineId: line.id,
-                            locationCode: row.locationCode,
-                            qty: Math.min(row.availableQty, line.requiredQty - line.preparedQty),
-                          },
-                          `${Math.min(row.availableQty, line.requiredQty - line.preparedQty)} units prepared at ${row.locationCode}; physical quantity unchanged.`,
-                        )
-                      }
-                    >
-                      <PackageCheck /> Allocate & prepare
-                    </Button>
-                  </div>
-                ))}
-                {!candidates.length && <Empty label="No eligible stock is available." />}
+              <div className="panel-body summary-list">
+                <Summary label={t("common.location")} value={line.allocationLocation ?? t("common.notAllocated")} mono />
+                <Summary label={t("common.prepared")} value={line.preparedQty} />
+                {Boolean(serialRequired) && <Summary label="SN" value={line.scannedSerials.join(" · ")} mono />}
               </div>
             </div>
           )}
-          {line.preparedQty > 0 && order.status !== "Outbound" && serialRequired && (
-            <div className="scanner">
-              <div className="scanner-title">
-                <ScanLine /> Scan serial numbers
-              </div>
-              <form className="scanner-row" onSubmit={scanSerial}>
-                <input
-                  autoFocus
-                  placeholder="Scan SN and press Enter"
-                  value={scan}
-                  onChange={(event) => setScan(event.target.value)}
-                />
-                <Button className="primary" type="submit">
-                  Add SN
-                </Button>
-              </form>
-              <div className="serial-chips">
-                {line.scannedSerials.map((serial) => (
-                  <span className="serial-chip" key={serial}>
-                    {serial}
-                  </span>
-                ))}
-                {!line.scannedSerials.length && (
-                  <span className="subtle">Try EQ48S260700001 and EQ48S260700002.</span>
-                )}
-              </div>
-            </div>
+          {!canUseAtomicPreparation && !selectedLineComplete && !["Ready_for_Pickup", "Outbound", "ERP_Synced"].includes(order.status) && (
+            <div className="notice warn">{t("outbound.legacyPreparationException")}</div>
           )}
         </div>
         <div className="grid">
           <div className="panel">
             <div className="panel-head">
-              <h3>Order summary</h3>
+              <h3>{t("outbound.orderSummary")}</h3>
             </div>
             <div className="panel-body summary-list">
-              <Summary label="SH No" value={order.shNo} mono />
-              <Summary label="Pickup code" value={order.pickupCode ?? "Generated at preparation"} mono />
-              <Summary label="ERP warehouse" value={order.erpWarehouse} />
-              <Summary label="Physical warehouse" value={order.warehouseCode} />
-              <Summary label="Allocation" value={line.allocationLocation ?? "Not allocated"} />
+              <Summary label="SH" value={order.shNo} mono />
+              <Summary label={t("summary.pickupCode")} value={order.pickupCode ?? t("outbound.pickupWhenPrepared")} mono />
+              <Summary label={t("summary.erpWarehouse")} value={order.erpWarehouse === "Unmapped" ? t("status.Unmapped") : order.erpWarehouse} />
+              <Summary label={t("summary.physicalWarehouse")} value={order.warehouseCode} />
+              <Summary label={t("summary.allocation")} value={line.allocationLocation ?? t("common.notAllocated")} />
               <Summary
-                label="Allocation detail"
+                label={t("summary.allocationDetail")}
                 value={
                   line.allocations.length
                     ? line.allocations.map((row) => `${row.locationCode} × ${row.quantity}`).join("; ")
-                    : "Not allocated"
+                    : t("common.notAllocated")
                 }
               />
-              <Summary label="ERP sync" value={order.erpSyncStatus} />
+              <Summary label={t("summary.erpSync")} value={<StatusBadge code={order.erpSyncStatus} />} />
             </div>
           </div>
           {line.preparedQty > 0 && (
             <div className="notice warn">
-              Frozen {line.preparedQty}. Physical stock remains unchanged until Confirm Dispatch.
+              {t("outbound.preparedPhysicalHelp", { frozen: line.preparedQty })}
             </div>
           )}
           {!canDispatch && order.status !== "Outbound" && (
             <div className="notice error">
-              Dispatch is blocked until all requested quantities are prepared and all required serial numbers are scanned.
+              {t("outbound.dispatchBlocked")}
             </div>
           )}
         </div>
@@ -840,9 +653,30 @@ function OutboundDetail({
 }
 
 function Summary({ label, value, mono }: { label: string; value: ReactNode; mono?: boolean }) {
+  const { t } = useI18n();
+  const keys: Record<string, string> = {
+    Model: "common.model",
+    Warehouse: "common.warehouse",
+    Location: "common.location",
+    Condition: "common.condition",
+    "Pickup code": "summary.pickupCode",
+    "ERP warehouse": "summary.erpWarehouse",
+    "Physical warehouse": "summary.physicalWarehouse",
+    Allocation: "summary.allocation",
+    "Allocation detail": "summary.allocationDetail",
+    "ERP sync": "summary.erpSync",
+    "Related SH": "summary.relatedSH",
+    "Related transfer": "summary.relatedTransfer",
+    "Original outbound": "summary.originalOutbound",
+    "Default warehouse": "summary.defaultWarehouse",
+    "Default location": "summary.defaultLocation",
+    "Inventory condition": "summary.inventoryCondition",
+    "SN status": "summary.snStatus",
+    Transaction: "summary.transaction",
+  };
   return (
     <div className="summary-row">
-      <span>{label}</span>
+      <span>{keys[label] ? t(keys[label]) : label}</span>
       <strong className={cn(mono && "mono")}>{value}</strong>
     </div>
   );
@@ -855,7 +689,13 @@ function ReceivingView({
   state: WmsState;
   commit: (command: WmsCommand, success: string) => Promise<boolean>;
 }) {
+  const { t } = useI18n();
   const [tab, setTab] = useState("Standard Inbound");
+  const tabs = [
+    ["Standard Inbound", t("nav.receiving")],
+    ["Faulty Return", t("nav.repair")],
+    ["Transfer Receive", t("nav.transfers")],
+  ];
   function receive(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
@@ -875,16 +715,16 @@ function ReceivingView({
         remark: String(data.get("remark")),
         serialNumber: serial ? serial.toUpperCase() : undefined,
       },
-      "Standard inbound recorded and inventory updated.",
+      t("receiving.standardSuccess"),
     );
   }
   return (
     <>
-      <PageHead title="Receive stock" subtitle="Standard inbound, faulty returns and transfer receipts use distinct workflows." />
+      <PageHead title={t("title.receiving")} subtitle={t("page.receivingSubtitle")} />
       <div className="panel">
         <div className="tabs">
-          {["Standard Inbound", "Faulty Return", "Transfer Receive"].map((label) => (
-            <button className={cn("tab", tab === label && "active")} onClick={() => setTab(label)} key={label}>
+          {tabs.map(([value, label]) => (
+            <button className={cn("tab", tab === value && "active")} onClick={() => setTab(value)} key={value}>
               {label}
             </button>
           ))}
@@ -892,12 +732,12 @@ function ReceivingView({
         {tab === "Standard Inbound" && (
           <form className="panel-body" onSubmit={receive}>
             <div className="form-grid">
-              <Field label="Warehouse">
+              <Field label={t("field.warehouse")}>
                 <select disabled>
-                  <option>SYD · Sydney Service Warehouse</option>
+                  <option>{state.warehouses.find((row) => row.code === "SYD")?.code} · {state.warehouses.find((row) => row.code === "SYD")?.name}</option>
                 </select>
               </Field>
-              <Field label="Destination location">
+              <Field label={t("field.destinationLocation")}>
                 <select name="location" defaultValue="FLEX-01">
                   {state.locations
                     .filter((row) => row.warehouseCode === "SYD")
@@ -915,43 +755,43 @@ function ReceivingView({
                   ))}
                 </select>
               </Field>
-              <Field label="Condition">
+              <Field label={t("field.condition")}>
                 <select name="condition" defaultValue="New">
-                  <option>New</option>
-                  <option>Repair_Good</option>
-                  <option>Material</option>
+                  <option value="New">{t("status.New")}</option>
+                  <option value="Repair_Good">{t("status.Repair_Good")}</option>
+                  <option value="Material">{t("status.Material")}</option>
                 </select>
               </Field>
-              <Field label="Quantity">
+              <Field label={t("field.quantity")}>
                 <input name="qty" type="number" min="1" defaultValue="1" />
               </Field>
-              <Field label="Serial number" help="Required for a traceable Product unit. Scanner input behaves as keyboard entry.">
-                <input name="serial" placeholder="Scan or enter SN" />
+              <Field label={t("field.serialNumber")} help={t("receiving.traceableHelp")}>
+                <input name="serial" placeholder={t("receiving.scanPlaceholder")} />
               </Field>
-              <Field label="Remark" full>
+              <Field label={t("field.remark")} full>
                 <textarea name="remark" defaultValue="Standard ERP inbound receipt." />
               </Field>
             </div>
             <div className="form-actions">
               <Button className="primary" type="submit">
-                <PackageOpen /> Confirm receipt
+                <PackageOpen /> {t("action.confirmReceipt")}
               </Button>
             </div>
           </form>
         )}
         {tab === "Faulty Return" && (
           <div className="panel-body">
-            <div className="notice">Faulty receipts use ERP SN lookup and default to the Sydney repair location.</div>
+            <div className="notice">{t("receiving.faultyNotice")}</div>
             <Link className="btn primary" href="/repair">
-              <Wrench /> Open faulty receiving
+              <Wrench /> {t("action.openFaulty")}
             </Link>
           </div>
         )}
         {tab === "Transfer Receive" && (
           <div className="panel-body">
-            <div className="notice">Transfer receipt reduces In Transit and increases destination physical inventory.</div>
+            <div className="notice">{t("receiving.transferNotice")}</div>
             <Link className="btn primary" href="/transfers">
-              <Truck /> Open transfers
+              <Truck /> {t("receiving.openTransfers")}
             </Link>
           </div>
         )}
@@ -971,9 +811,24 @@ function Field({
   full?: boolean;
   children: ReactNode;
 }) {
+  const { t } = useI18n();
+  const fieldKeys: Record<string, string> = {
+    Warehouse: "field.warehouse",
+    "Destination location": "field.destinationLocation",
+    Location: "field.location",
+    "From location": "field.fromLocation",
+    "To location": "field.toLocation",
+    Condition: "field.condition",
+    Quantity: "field.quantity",
+    "Serial number": "field.serialNumber",
+    Remark: "field.remark",
+    Direction: "field.direction",
+    "Item type": "field.itemType",
+    Reason: "field.reason",
+  };
   return (
     <div className={cn("field", full && "full")}>
-      <label>{label}</label>
+      <label>{fieldKeys[label] ? t(fieldKeys[label]) : label}</label>
       {children}
       {help && <span className="field-help">{help}</span>}
     </div>
@@ -987,61 +842,90 @@ function RepairView({
   state: WmsState;
   commit: (command: WmsCommand, success: string) => Promise<boolean>;
 }) {
-  const [serial, setSerial] = useState("60E5M4805C3F242");
+  const { t } = useI18n();
+  const [serial, setSerial] = useState("");
   const [record, setRecord] = useState<ERPSerialLookup | null>(null);
   const [searched, setSearched] = useState(false);
+  const [lookupBusy, setLookupBusy] = useState(false);
+  const [scanFeedback, setScanFeedback] = useState<{ tone: "success" | "error"; message: string }>();
+  const faultyScannerRef = useRef<HTMLInputElement>(null);
+  const lastLookup = useRef<{ value: string; at: number } | undefined>(undefined);
   async function lookup(event: FormEvent) {
     event.preventDefault();
-    const response = await fetch(`/api/wms/faulty-lookup?serialNumber=${encodeURIComponent(serial)}`, { cache: "no-store" });
-    const result = (await response.json()) as ERPSerialLookup | { error: string };
-    setRecord(response.ok ? (result as ERPSerialLookup) : null);
-    setSearched(true);
+    const value = serial.trim().toUpperCase();
+    const now = Date.now();
+    if (!value || lookupBusy) return;
+    if (lastLookup.current?.value === value && now - lastLookup.current.at < 800) {
+      setScanFeedback({ tone: "error", message: t("scanner.duplicate") });
+      restoreScannerFocus(faultyScannerRef.current);
+      return;
+    }
+    lastLookup.current = { value, at: now };
+    setLookupBusy(true);
+    try {
+      const response = await fetch(`/api/wms/faulty-lookup?serialNumber=${encodeURIComponent(value)}`, { cache: "no-store" });
+      const result = (await response.json()) as ERPSerialLookup | { error: string };
+      setRecord(response.ok ? (result as ERPSerialLookup) : null);
+      setSearched(true);
+      if (response.ok) {
+        setSerial("");
+        setScanFeedback({ tone: "success", message: t("scanner.accepted") });
+      } else {
+        setScanFeedback({ tone: "error", message: "error" in result ? result.error : "SN not found" });
+      }
+    } finally {
+      setLookupBusy(false);
+      window.setTimeout(() => restoreScannerFocus(faultyScannerRef.current), 0);
+    }
   }
   return (
     <>
       <PageHead
-        title="Faulty unit receiving"
-        subtitle="Scan the returned unit. Mock ERP supplies related SH and replacement context without duplicate data entry."
+        title={t("title.repair")}
+        subtitle={t("page.repairSubtitle")}
       />
       <div className="split">
         <div className="panel">
           <div className="panel-head">
-            <h3>1 · Scan returned unit</h3>
+            <h3>{t("repair.scanReturnedStep")}</h3>
           </div>
           <div className="panel-body">
             <form className="scanner" onSubmit={lookup}>
               <div className="scanner-title">
-                <ScanLine /> Faulty serial number
+                <ScanLine /> {t("repair.faultySN")}
               </div>
               <div className="scanner-row">
                 <input
+                  ref={faultyScannerRef}
                   autoFocus
+                  autoComplete="off"
                   value={serial}
                   onChange={(event) => setSerial(event.target.value.toUpperCase())}
-                  placeholder="Scan SN and press Enter"
+                  placeholder={`${t("scanner.scanSerial")} → Enter`}
                 />
-                <Button className="primary" type="submit">
-                  Query ERP
+                <Button className="primary" type="submit" disabled={lookupBusy}>
+                  {t("action.queryERP")}
                 </Button>
               </div>
+              {scanFeedback && <div className={`scan-feedback ${scanFeedback.tone}`} aria-live="polite">{scanFeedback.message}</div>}
             </form>
             {searched && !record && (
               <div className="notice error" style={{ marginTop: 14 }}>
-                ERP record not found. A Manual Review exception is required before controlled receipt.
+                {t("repair.erpNotFound")}
               </div>
             )}
             {record && (
               <div style={{ marginTop: 16 }}>
                 <div className="notice">
-                  <strong>ERP match found.</strong> Review the supplied details, then receive to REPAIR-01.
+                  {t("repair.erpFound")}
                 </div>
                 <div className="summary-list">
-                  <Summary label="Serial number" value={record.serialNumber} mono />
-                  <Summary label="Related SH" value={record.relatedShNo} mono />
+                  <Summary label={t("field.serialNumber")} value={record.serialNumber} mono />
+                  <Summary label={t("summary.relatedSH")} value={record.relatedShNo} mono />
                   <Summary label="SKU" value={record.sku} mono />
-                  <Summary label="Model" value={record.model} />
-                  <Summary label="Original outbound" value={record.originalOutboundDate} />
-                  <Summary label="ERP status" value={record.erpStatus} />
+                  <Summary label={t("common.model")} value={record.model} />
+                  <Summary label={t("summary.originalOutbound")} value={record.originalOutboundDate} />
+                  <Summary label={t("summary.erpStatus")} value={<StatusBadge code={record.erpStatus} />} />
                 </div>
                 <div className="form-actions">
                   <Button
@@ -1049,11 +933,11 @@ function RepairView({
                     onClick={() =>
                       commit(
                         { type: "receiveFaulty", serialNumber: record.serialNumber },
-                        `${record.serialNumber} received to REPAIR-01 with status Repair.`,
+                        t("success.faultyReceived", { sn: record.serialNumber }),
                       )
                     }
                   >
-                    <PackageOpen /> Confirm faulty receipt
+                    <PackageOpen /> {t("action.confirmFaulty")}
                   </Button>
                 </div>
               </div>
@@ -1062,16 +946,65 @@ function RepairView({
         </div>
         <div className="panel">
           <div className="panel-head">
-            <h3>Repair receiving policy</h3>
+            <h3>{t("repair.receivingPolicy")}</h3>
           </div>
           <div className="panel-body summary-list">
-            <Summary label="Default warehouse" value="SYD" />
-            <Summary label="Default location" value="REPAIR-01" />
-            <Summary label="Inventory condition" value={<Badge>Repair</Badge>} />
-            <Summary label="SN status" value={<Badge>Repair</Badge>} />
-            <Summary label="Transaction" value="Return_to_Repair" />
-            <Summary label="Faulty receipts recorded" value={state.faultyReceivedCount} />
+            <Summary label={t("summary.defaultWarehouse")} value="SYD" />
+            <Summary label={t("summary.defaultLocation")} value="REPAIR-01" />
+            <Summary label={t("summary.inventoryCondition")} value={<StatusBadge code="Repair" />} />
+            <Summary label={t("summary.snStatus")} value={<StatusBadge code="Repair" />} />
+            <Summary label={t("summary.transaction")} value={<StatusBadge code="Return_to_Repair" />} />
+            <Summary label={t("summary.faultyReceipts")} value={state.faultyReceivedCount} />
           </div>
+        </div>
+      </div>
+      <div className="panel" style={{ marginTop: 16 }}>
+        <div className="panel-head">
+          <h3>{t("repair.lifecycleQueue")}</h3>
+          <span className="subtle">{t("repair.preserveSn")}</span>
+        </div>
+        <div className="panel-body grid">
+          {(state.repairJobs ?? []).map((job) => (
+            <div className="allocation-card" key={job.id}>
+              <div className="strong mono">{job.serialNumber ?? t("repair.unknownLegacySn")}</div>
+              <div className="subtle">{job.model} · <StatusBadge code={job.status} /> · {job.currentLocation}</div>
+              <Button
+                disabled={!["Received", "Pending_Repair"].includes(job.status)}
+                onClick={() =>
+                  commit(
+                    {
+                      type: "startRepair",
+                      repairJobId: job.id,
+                      remark: "Warehouse repair work started.",
+                    },
+                    t("success.repairStarted", { item: job.serialNumber ?? job.sku }),
+                  )
+                }
+              >
+                <Wrench /> {t("action.startRepair")}
+              </Button>
+              <Button
+                className="primary"
+                disabled={job.status !== "In_Repair"}
+                onClick={() => {
+                  if (!window.confirm(t("confirm.repairComplete", { sn: job.serialNumber ?? job.sku }))) return;
+                  commit(
+                    {
+                      type: "completeRepair",
+                      repairJobId: job.id,
+                      targetLocationCode: "FLEX-01",
+                      outcome: "Repair_Good",
+                      remark: "Technician repair completed; returned to serviceable stock.",
+                    },
+                    t("success.repairCompleted", { item: job.serialNumber ?? job.sku }),
+                  );
+                }}
+              >
+                <Wrench /> {t("action.completeRepair")}
+              </Button>
+            </div>
+          ))}
+          {!state.repairJobs?.length && <Empty label={t("repair.empty")} />}
         </div>
       </div>
     </>
@@ -1085,9 +1018,18 @@ function MoveView({
   state: WmsState;
   commit: (command: WmsCommand, success: string) => Promise<boolean>;
 }) {
+  const { t } = useI18n();
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
+    if (
+      String(data.get("direction")) === "Out" &&
+      !window.confirm(t("confirm.adjustmentOut", {
+        sku: String(data.get("sku") || "NO-SKU"),
+        location: String(data.get("location")),
+        units: Number(data.get("qty")),
+      }))
+    ) return;
     commit(
       {
         type: "moveStock",
@@ -1099,26 +1041,26 @@ function MoveView({
           qty: Number(data.get("qty")),
           remark: String(data.get("remark")),
       },
-      "Move completed atomically. Warehouse total is unchanged.",
+      t("success.move"),
     );
   }
   const product = state.products.find((row) => row.sku === "10-105-00346-00");
   return (
     <>
-      <PageHead title="Move stock" subtitle="One atomic business transaction moves stock between locations in the same warehouse." />
+      <PageHead title={t("title.move")} subtitle={t("page.moveSubtitle")} />
       <div className="notice warn">
-        Cross-warehouse movement is blocked here. Use Transfer for SYD → MEL or any other warehouse pair.
+        {t("move.warning")}
       </div>
       <div className="split">
         <form className="panel" onSubmit={submit}>
           <div className="panel-head">
-            <h3>Move details</h3>
-            <Badge tone="teal">Atomic</Badge>
+            <h3>{t("move.details")}</h3>
+            <Badge tone="teal">{t("common.atomic")}</Badge>
           </div>
           <div className="panel-body">
             <div className="form-grid">
-              <Field label="Warehouse">
-                <input value="SYD · Sydney Service Warehouse" readOnly />
+              <Field label={t("field.warehouse")}>
+                <input value={state.warehouses.find((row) => row.code === "SYD")?.name ?? "SYD"} readOnly />
               </Field>
               <Field label="SKU">
                 <select name="sku" defaultValue="10-105-00346-00">
@@ -1129,7 +1071,7 @@ function MoveView({
                   ))}
                 </select>
               </Field>
-              <Field label="From location">
+              <Field label={t("field.fromLocation")}>
                 <select name="from" defaultValue="R1-4-2-L">
                   {state.locations
                     .filter((row) => row.warehouseCode === "SYD")
@@ -1138,7 +1080,7 @@ function MoveView({
                     ))}
                 </select>
               </Field>
-              <Field label="To location">
+              <Field label={t("field.toLocation")}>
                 <select name="to" defaultValue="FLEX-01">
                   {state.locations
                     .filter((row) => row.warehouseCode === "SYD")
@@ -1147,37 +1089,37 @@ function MoveView({
                     ))}
                 </select>
               </Field>
-              <Field label="Condition">
+              <Field label={t("field.condition")}>
                 <select name="condition" defaultValue="Material">
-                  <option>Material</option>
-                  <option>New</option>
-                  <option>Repair_Good</option>
-                  <option>Repair</option>
+                  <option value="Material">{t("status.Material")}</option>
+                  <option value="New">{t("status.New")}</option>
+                  <option value="Repair_Good">{t("status.Repair_Good")}</option>
+                  <option value="Repair">{t("status.Repair")}</option>
                 </select>
               </Field>
-              <Field label="Quantity">
+              <Field label={t("field.quantity")}>
                 <input name="qty" type="number" min="1" defaultValue="10" />
               </Field>
-              <Field label="Remark" full>
+              <Field label={t("field.remark")} full>
                 <textarea name="remark" defaultValue="Replenishment move from rack to FLEX staging." />
               </Field>
             </div>
             <div className="form-actions">
               <Button className="primary" type="submit">
-                <Move /> Confirm move
+                <Move /> {t("action.confirmMove")}
               </Button>
             </div>
           </div>
         </form>
         <div className="panel">
           <div className="panel-head">
-            <h3>Source preview</h3>
+            <h3>{t("move.sourcePreview")}</h3>
           </div>
           <div className="panel-body">
             <Summary label="SKU" value={product?.sku ?? "—"} mono />
             <Summary label="Model" value={product?.model ?? "—"} />
             <Summary
-              label="Available at R1-4-2-L"
+              label={t("move.availableAt", { location: "R1-4-2-L" })}
               value={
                 state.inventory.find(
                   (row) => row.locationCode === "R1-4-2-L" && row.sku === "10-105-00346-00",
@@ -1201,6 +1143,7 @@ function AdjustmentView({
   state: WmsState;
   commit: (command: WmsCommand, success: string) => Promise<boolean>;
 }) {
+  const { t } = useI18n();
   const [noSku, setNoSku] = useState(false);
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1219,36 +1162,36 @@ function AdjustmentView({
           reason: String(data.get("reason")),
           remark: String(data.get("remark")),
       },
-      "Adjustment transaction recorded and current stock updated.",
+      t("success.adjustment"),
     );
   }
   return (
     <>
-      <PageHead title="Stock adjustment" subtitle="Supervisor-controlled correction with explicit reason and immutable audit history." />
+      <PageHead title={t("title.adjustment")} subtitle={t("page.adjustmentSubtitle")} />
       <div className="split">
         <form className="panel" onSubmit={submit}>
           <div className="panel-head">
-            <h3>Adjustment details</h3>
-            <Badge tone="amber">Supervisor</Badge>
+            <h3>{t("adjustment.details")}</h3>
+            <Badge tone="amber">{t("common.supervisor")}</Badge>
           </div>
           <div className="panel-body">
             <div className="form-grid">
-              <Field label="Direction">
+              <Field label={t("field.direction")}>
                 <select name="direction">
-                  <option>In</option>
-                  <option>Out</option>
+                  <option value="In">{t("operation.in")}</option>
+                  <option value="Out">{t("operation.out")}</option>
                 </select>
               </Field>
-              <Field label="Warehouse">
+              <Field label={t("field.warehouse")}>
                 <input value="SYD" readOnly />
               </Field>
-              <Field label="Item type">
+              <Field label={t("field.itemType")}>
                 <select name="itemType" defaultValue="Material">
-                  <option>Material</option>
-                  <option>Product</option>
+                  <option value="Material">{t("status.Material")}</option>
+                  <option value="Product">{t("status.Product")}</option>
                 </select>
               </Field>
-              <Field label="Location">
+              <Field label={t("field.location")}>
                 <select name="location" defaultValue="R1-4-3-L">
                   {state.locations
                     .filter((row) => row.warehouseCode === "SYD")
@@ -1257,7 +1200,7 @@ function AdjustmentView({
                     ))}
                 </select>
               </Field>
-              <Field label="SKU" help="May be omitted only for controlled unmonitored Material.">
+              <Field label="SKU" help={t("adjustment.skuHelp")}>
                 <select name="sku" defaultValue="20-012-10219-08" disabled={noSku}>
                   {state.products.map((row) => (
                     <option value={row.sku} key={row.id}>
@@ -1270,54 +1213,54 @@ function AdjustmentView({
                   Unmonitored no-SKU material
                 </label>
               </Field>
-              <Field label="Condition">
+              <Field label={t("field.condition")}>
                 <select name="condition" defaultValue="Material">
-                  <option>Material</option>
-                  <option>New</option>
-                  <option>Repair_Good</option>
-                  <option>Repair</option>
-                  <option>Scrap</option>
+                  <option value="Material">{t("status.Material")}</option>
+                  <option value="New">{t("status.New")}</option>
+                  <option value="Repair_Good">{t("status.Repair_Good")}</option>
+                  <option value="Repair">{t("status.Repair")}</option>
+                  <option value="Scrap">{t("status.Scrap")}</option>
                 </select>
               </Field>
-              <Field label="Quantity">
+              <Field label={t("field.quantity")}>
                 <input name="qty" type="number" min="1" defaultValue="12" />
               </Field>
-              <Field label="Reason">
+              <Field label={t("field.reason")}>
                 <select name="reason" defaultValue={noSku ? "Unmonitored material" : "Count correction"}>
-                  <option>Count correction</option>
-                  <option>Repair completion</option>
-                  <option>Damage write-off</option>
-                  <option>Unmonitored material</option>
+                  <option value="Count correction">{t("reason.countCorrection")}</option>
+                  <option value="Repair completion">{t("reason.repairCompletion")}</option>
+                  <option value="Damage write-off">{t("reason.damageWriteOff")}</option>
+                  <option value="Unmonitored material">{t("reason.unmonitoredMaterial")}</option>
                 </select>
               </Field>
-              <Field label="Remark" full>
+              <Field label={t("field.remark")} full>
                 <textarea name="remark" defaultValue="Supervisor-approved stock correction." />
               </Field>
             </div>
             <div className="form-actions">
               <Button className="primary" type="submit">
-                <SlidersHorizontal /> Post adjustment
+                <SlidersHorizontal /> {t("action.postAdjustment")}
               </Button>
             </div>
           </div>
         </form>
         <div className="panel">
           <div className="panel-head">
-            <h3>Adjustment guardrails</h3>
+            <h3>{t("adjustment.guardrails")}</h3>
           </div>
           <div className="panel-body">
             <div className="timeline">
               <div className="timeline-item">
-                <strong>Never overwrite a balance</strong>
-                <p>Every correction creates an Adjustment_In or Adjustment_Out ledger entry.</p>
+                <strong>{t("adjustment.neverOverwrite")}</strong>
+                <p>{t("adjustment.neverOverwriteHelp")}</p>
               </div>
               <div className="timeline-item">
-                <strong>Product requires SKU</strong>
-                <p>Blank SKU is permitted only for unmonitored material with the exact controlled reason.</p>
+                <strong>{t("adjustment.productRequiresSku")}</strong>
+                <p>{t("adjustment.productRequiresSkuHelp")}</p>
               </div>
               <div className="timeline-item">
-                <strong>Move is separate</strong>
-                <p>Use Move when stock has a known source and destination.</p>
+                <strong>{t("adjustment.moveSeparate")}</strong>
+                <p>{t("adjustment.moveSeparateHelp")}</p>
               </div>
             </div>
           </div>
@@ -1328,7 +1271,40 @@ function AdjustmentView({
 }
 
 function SerialSearchView({ state }: { state: WmsState }) {
-  const [query, setQuery] = useState("60E5M4805C3F242");
+  const { locale, t } = useI18n();
+  const initialQuery = () => typeof window === "undefined"
+    ? ""
+    : new URLSearchParams(window.location.search).get("query")?.trim().toUpperCase() ?? "";
+  const [draft, setDraft] = useState("");
+  const [query, setQuery] = useState(initialQuery);
+  const [remoteResults, setRemoteResults] = useState<SerialNumber[]>([]);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const lastSearch = useRef<{ value: string; at: number } | undefined>(undefined);
+  function submitSearch(event: FormEvent) {
+    event.preventDefault();
+    const value = draft.trim().toUpperCase();
+    const now = Date.now();
+    if (!value) return;
+    if (lastSearch.current?.value === value && now - lastSearch.current.at < 800) return;
+    lastSearch.current = { value, at: now };
+    setQuery(value);
+    setDraft("");
+    window.setTimeout(() => restoreScannerFocus(searchRef.current), 0);
+  }
+  useEffect(() => {
+    if (!query) return;
+    const controller = new AbortController();
+    fetch(`/api/serials/search?q=${encodeURIComponent(query)}&limit=25`, { cache: "no-store", signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(t("common.loadFailed"));
+        const body = await response.json();
+        setRemoteResults(body.rows);
+      })
+      .catch((reason) => {
+        if (reason?.name !== "AbortError") setRemoteResults([]);
+      });
+    return () => controller.abort();
+  }, [query, t]);
   const results = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return [];
@@ -1344,7 +1320,7 @@ function SerialSearchView({ state }: { state: WmsState }) {
         ),
     );
   }, [query, state]);
-  const selected = results[0];
+  const selected = remoteResults[0] ?? results[0];
   const transactions = selected
     ? state.transactions.filter(
         (row) =>
@@ -1355,48 +1331,56 @@ function SerialSearchView({ state }: { state: WmsState }) {
     : [];
   return (
     <>
-      <PageHead title="Serial number search" subtitle="Search SN, SH No, pickup code or SKU and inspect the traceability timeline." />
-      <div className="scanner" style={{ marginBottom: 16 }}>
+      <PageHead title={t("title.snSearch")} subtitle={t("page.snSubtitle")} />
+      <form className="scanner" style={{ marginBottom: 16 }} onSubmit={submitSearch}>
         <div className="scanner-title">
           <Search /> Trace inventory
         </div>
         <div className="scanner-row">
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="SN, SH, pickup code or SKU" />
-          <Button className="primary">Search</Button>
+          <input ref={searchRef} autoFocus autoComplete="off" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder={t("scanner.searchPlaceholder")} />
+          <Button className="primary" type="submit">{t("common.search")}</Button>
         </div>
-      </div>
+      </form>
       {selected ? (
         <div className="split">
           <div className="panel">
             <div className="panel-head">
               <h3 className="mono">{selected.serialNumber}</h3>
-              <Badge>{selected.status.replaceAll("_", " ")}</Badge>
+              <StatusBadge code={selected.status} />
             </div>
             <div className="panel-body summary-list">
               <Summary label="SKU" value={selected.sku} mono />
-              <Summary label="Model" value={selected.model} />
-              <Summary label="Warehouse" value={selected.warehouseCode ?? "Outside WMS inventory"} />
-              <Summary label="Location" value={selected.locationCode ?? "—"} />
-              <Summary label="Condition" value={<Badge>{selected.condition}</Badge>} />
-              <Summary label="Related SH" value={selected.relatedShNo ?? "—"} mono />
-              <Summary label="Related transfer" value={selected.relatedTransferNo ?? "—"} mono />
+              <Summary label={t("common.model")} value={selected.model} />
+              <Summary label={t("common.warehouse")} value={selected.warehouseCode ?? t("common.outsideWms")} />
+              <Summary label={t("common.location")} value={selected.locationCode ?? "—"} />
+              <Summary label={t("common.condition")} value={<StatusBadge code={selected.condition} />} />
+              <Summary label={t("summary.relatedSH")} value={selected.relatedShNo ?? "—"} mono />
+              <Summary label={t("summary.relatedTransfer")} value={selected.relatedTransferNo ?? "—"} mono />
             </div>
           </div>
           <div className="panel">
             <div className="panel-head">
-              <h3>Transaction timeline</h3>
+              <h3>{t("scanner.transactionTimeline")}</h3>
             </div>
             <div className="panel-body timeline">
               {transactions.map((row) => (
                 <div className="timeline-item" key={row.id}>
                   <strong>{row.type.replaceAll("_", " ")}</strong>
+                  {(row.sourceCondition || row.targetCondition || row.repairOutcome) && (
+                    <p>
+                      {row.sourceCondition ?? row.condition} → {row.targetCondition ?? row.condition}
+                      {row.repairOutcome
+                        ? ` · ${row.repairOutcome.replaceAll("_", " ")}`
+                        : ""}
+                    </p>
+                  )}
                   <p>
-                    {formatDate(row.at)} · {row.fromLocation ?? "—"} → {row.toLocation ?? "—"}
+                    {formatWarehouseDateTime(row.at, locale, "Australia/Sydney")} · {row.fromLocation ?? "—"} → {row.toLocation ?? "—"}
                   </p>
                 </div>
               ))}
               <div className="timeline-item">
-                <strong>Current status · {selected.status.replaceAll("_", " ")}</strong>
+                <strong>{t("common.status")} · {t(`status.${selected.status}`)}</strong>
                 <p>{selected.locationCode ?? "No current physical location"}</p>
               </div>
             </div>
@@ -1404,7 +1388,7 @@ function SerialSearchView({ state }: { state: WmsState }) {
         </div>
       ) : (
         <div className="panel">
-          <Empty label="No matching serial trace was found." />
+          <Empty label={t("scanner.noTrace")} />
         </div>
       )}
     </>
@@ -1413,38 +1397,62 @@ function SerialSearchView({ state }: { state: WmsState }) {
 
 function TransferView({
   state,
+  warehouse,
   commit,
+  refresh,
 }: {
   state: WmsState;
+  warehouse: WarehouseCode;
   commit: (command: WmsCommand, success: string) => Promise<boolean>;
+  refresh: () => Promise<void>;
 }) {
+  const { t } = useI18n();
   return (
     <>
-      <PageHead title="Inter-warehouse transfers" subtitle="Transfer Out creates In Transit inventory; Transfer In receives it at the destination." />
-      <div className="notice">Normal Move cannot cross warehouses. Transfer serials are relational records, never comma-separated text.</div>
+      <PageHead title={t("title.transfers")} subtitle={t("page.transferSubtitle")} />
+      <BatchTransferPanel sourceWarehouse={warehouse} onConfirmed={refresh} />
+      {state.transfers
+        .filter((transfer, index, rows) =>
+          transfer.status === "In_Transit" &&
+          transfer.destinationWarehouse === warehouse &&
+          rows.findIndex((candidate) => candidate.id === transfer.id) === index
+        )
+        .map((transfer) => (
+          <TransferReceiptPanel
+            key={`receipt-${transfer.id}`}
+            transferId={transfer.id}
+            transferNo={transfer.transferNo}
+            destinationWarehouse={transfer.destinationWarehouse}
+            expectedCount={state.transfers
+              .filter((candidate) => candidate.id === transfer.id)
+              .reduce((sum, candidate) => sum + candidate.serials.length, 0)}
+            onConfirmed={refresh}
+          />
+        ))}
+      <div className="notice">{t("transfer.notice")}</div>
       <div className="panel">
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Transfer</th>
-                <th>Route</th>
-                <th>SKU / Model</th>
-                <th className="number">Qty</th>
-                <th>Serials</th>
-                <th>Status</th>
-                <th>Action</th>
+                <th>{t("table.transfer")}</th>
+                <th>{t("table.route")}</th>
+                <th>SKU / {t("common.model")}</th>
+                <th className="number">{t("common.quantityShort")}</th>
+                <th>{t("table.serials")}</th>
+                <th>{t("common.status")}</th>
+                <th>{t("table.action")}</th>
               </tr>
             </thead>
             <tbody>
               {state.transfers.map((transfer) => (
-                <tr key={transfer.id}>
+                <tr key={`${transfer.id}:${transfer.sku}:${transfer.condition}`}>
                   <td className="mono strong">{transfer.transferNo}</td>
                   <td>
                     <span className="strong">{transfer.sourceWarehouse}</span> →{" "}
                     <span className="strong">{transfer.destinationWarehouse}</span>
                     <div className="subtle">
-                      {transfer.sourceLocation} → {transfer.destinationLocation ?? "destination pending"}
+                      {transfer.sourceLocation ?? "—"} → {transfer.destinationLocation ?? t("transfer.destinationPending")}
                     </div>
                   </td>
                   <td>
@@ -1460,36 +1468,29 @@ function TransferView({
                     ))}
                   </td>
                   <td>
-                    <Badge>{transfer.status.replaceAll("_", " ")}</Badge>
+                    <StatusBadge code={transfer.status} />
                   </td>
                   <td>
                     {transfer.status === "Draft" && (
                       <Button
                         className="primary small"
-                        onClick={() =>
+                        onClick={() => {
+                          if (!window.confirm(t("confirm.transferDispatch", {
+                            transfer: transfer.transferNo,
+                            route: `${transfer.sourceWarehouse} → ${transfer.destinationWarehouse}`,
+                            units: transfer.qty,
+                          }))) return;
                           commit(
                             { type: "dispatchTransfer", transferId: transfer.id },
-                            `${transfer.transferNo} dispatched; serial now In Transit.`,
-                          )
-                        }
+                            t("success.transferDispatched", { transfer: transfer.transferNo }),
+                          );
+                        }}
                       >
-                        Transfer Out
+                        {t("action.transferOut")}
                       </Button>
                     )}
-                    {transfer.status === "In_Transit" && (
-                      <Button
-                        className="primary small"
-                        onClick={() =>
-                          commit(
-                            { type: "receiveTransfer", transferId: transfer.id, destinationLocation: "M1-1-1-L" },
-                            `${transfer.transferNo} received into MEL at M1-1-1-L.`,
-                          )
-                        }
-                      >
-                        Transfer In
-                      </Button>
-                    )}
-                    {transfer.status === "Received" && <span className="subtle">Complete</span>}
+                    {transfer.status === "In_Transit" && <span className="subtle">{t("transfer.receiveTitle")}</span>}
+                    {transfer.status === "Received" && <span className="subtle">{t("transfer.complete")}</span>}
                   </td>
                 </tr>
               ))}
@@ -1502,37 +1503,38 @@ function TransferView({
 }
 
 function StocktakeView({ state, warehouse }: { state: WmsState; warehouse: "SYD" | "MEL" | "BNE" }) {
+  const { t } = useI18n();
   const rows = state.inventory.filter((row) => row.warehouseCode === warehouse).slice(0, 6);
   const [counts, setCounts] = useState<Record<string, string>>({});
   return (
     <>
       <PageHead
-        title="Stocktake"
-        subtitle="Preview count sheet keeps Physical, Frozen and Available visible while operators record actual counts."
+        title={t("title.stocktake")}
+        subtitle={t("page.stocktakeSubtitle")}
         actions={
           <Button className="primary">
-            <Plus /> Create stocktake
+            <Plus /> {t("action.createStocktake")}
           </Button>
         }
       />
-      <div className="notice warn">Preview architecture only: posting variances as supervisor-approved adjustments is a next-sprint item.</div>
+      <div className="notice warn">{t("stocktake.preview")}</div>
       <div className="panel">
         <div className="panel-head">
           <h3>ST-{warehouse}-0008 · Cycle count</h3>
-          <Badge tone="blue">Counting</Badge>
+          <Badge tone="blue">{t("common.counting")}</Badge>
         </div>
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Location</th>
+                <th>{t("common.location")}</th>
                 <th>SKU</th>
-                <th>Condition</th>
-                <th className="number">Physical</th>
-                <th className="number">Frozen</th>
-                <th className="number">Available</th>
-                <th>Counted</th>
-                <th className="number">Variance</th>
+                <th>{t("common.condition")}</th>
+                <th className="number">{t("common.physical")}</th>
+                <th className="number">{t("common.frozen")}</th>
+                <th className="number">{t("common.available")}</th>
+                <th>{t("table.counted")}</th>
+                <th className="number">{t("table.variance")}</th>
               </tr>
             </thead>
             <tbody>
@@ -1544,7 +1546,7 @@ function StocktakeView({ state, warehouse }: { state: WmsState; warehouse: "SYD"
                     <td className="strong">{row.locationCode}</td>
                     <td className="mono">{row.sku ?? "NO-SKU"}</td>
                     <td>
-                      <Badge>{row.condition}</Badge>
+                      <StatusBadge code={row.condition} />
                     </td>
                     <td className="number">{row.physicalQty}</td>
                     <td className="number">{row.frozenQty}</td>
@@ -1556,7 +1558,7 @@ function StocktakeView({ state, warehouse }: { state: WmsState; warehouse: "SYD"
                         min="0"
                         value={counted ?? ""}
                         onChange={(event) => setCounts((current) => ({ ...current, [row.id]: event.target.value }))}
-                        placeholder="Count"
+                        placeholder={t("common.counting")}
                       />
                     </td>
                     <td className="number strong">{variance ?? "—"}</td>
@@ -1572,30 +1574,49 @@ function StocktakeView({ state, warehouse }: { state: WmsState; warehouse: "SYD"
 }
 
 function AuditView({ state }: { state: WmsState }) {
+  const { t } = useI18n();
   const [query, setQuery] = useState("");
-  const rows = state.audit.filter((row) =>
-    `${row.operation} ${row.actor} ${row.businessReference ?? ""} ${row.remark}`.toLowerCase().includes(query.toLowerCase()),
-  );
+  const [page, setPage] = useState(1);
+  const [auditPage, setAuditPage] = useState<{ rows: AuditEntry[]; total: number; totalPages: number }>({
+    rows: state.audit,
+    total: state.audit.length,
+    totalPages: 1,
+  });
+  useEffect(() => {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      const params = new URLSearchParams({ page: String(page), pageSize: "50" });
+      if (query) params.set("operation", query);
+      fetch(`/api/audit?${params}`, { cache: "no-store", signal: controller.signal })
+        .then(async (response) => {
+          if (!response.ok) throw new Error(t("common.loadFailed"));
+          setAuditPage(await response.json());
+        })
+        .catch(() => undefined);
+    }, 180);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [page, query, t]);
+  const rows = auditPage.rows;
   return (
     <>
-      <PageHead title="Audit log" subtitle="Every important warehouse state change records actor, timestamp, entity and business reference." />
+      <PageHead title={t("title.audit")} subtitle={t("page.auditSubtitle")} />
       <div className="panel">
         <div className="toolbar">
           <div className="search-wrap">
             <Search />
-            <input placeholder="Filter operation, actor or reference" value={query} onChange={(event) => setQuery(event.target.value)} />
+            <input placeholder={t("audit.search")} value={query} onChange={(event) => setQuery(event.target.value)} />
           </div>
         </div>
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Timestamp</th>
-                <th>Operation</th>
-                <th>Actor</th>
-                <th>Entity</th>
-                <th>Business reference</th>
-                <th>Remark</th>
+                <th>{t("table.timestamp")}</th>
+                <th>{t("table.operation")}</th>
+                <th>{t("table.actor")}</th>
+                <th>{t("table.entity")}</th>
+                <th>{t("table.businessReference")}</th>
+                <th>{t("table.remark")}</th>
               </tr>
             </thead>
             <tbody>
@@ -1605,16 +1626,22 @@ function AuditView({ state }: { state: WmsState }) {
             </tbody>
           </table>
         </div>
+        <div className="toolbar">
+          <span className="subtle">{t("common.rowsPage", { rows: auditPage.total, page, pages: auditPage.totalPages || 1 })}</span>
+          <Button type="button" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>{t("common.previous")}</Button>
+          <Button type="button" disabled={page >= auditPage.totalPages} onClick={() => setPage((value) => value + 1)}>{t("common.next")}</Button>
+        </div>
       </div>
     </>
   );
 }
 
 function AuditRow({ row }: { row: AuditEntry }) {
+  const { locale } = useI18n();
   return (
     <tr>
-      <td>{formatDate(row.at)}</td>
-      <td className="strong">{row.operation}</td>
+      <td>{formatWarehouseDateTime(row.at, locale, "Australia/Sydney")}</td>
+      <td className="strong">{translateAuditOperation(locale, row.operation)}</td>
       <td>{row.actor}</td>
       <td>
         {row.entityType}
@@ -1627,17 +1654,18 @@ function AuditRow({ row }: { row: AuditEntry }) {
 }
 
 function ExceptionView({ state }: { state: WmsState }) {
+  const { locale, t } = useI18n();
   return (
     <>
-      <PageHead title="Operational exceptions" subtitle="Visible exception queues prevent ERP or inventory problems from disappearing silently." />
+      <PageHead title={t("title.exceptions")} subtitle={t("page.exceptionSubtitle")} />
       <div className="grid metrics" style={{ gridTemplateColumns: "repeat(4, minmax(140px, 1fr))", marginBottom: 16 }}>
         {(["Critical", "High", "Medium", "Low"] as const).map((severity) => (
           <div className={cn("metric", severity === "Critical" && "alert")} key={severity}>
-            <div className="metric-label">{severity} severity</div>
+            <div className="metric-label">{t("exception.severityLabel", { severity: t(`status.${severity}`) })}</div>
             <div className="metric-value">
               {state.exceptions.filter((row) => row.severity === severity && row.status !== "Resolved").length}
             </div>
-            <div className="metric-meta">Open or investigating</div>
+            <div className="metric-meta">{t("exception.open")}</div>
           </div>
         ))}
       </div>
@@ -1646,12 +1674,12 @@ function ExceptionView({ state }: { state: WmsState }) {
           <table>
             <thead>
               <tr>
-                <th>Severity</th>
-                <th>Type</th>
-                <th>Entity reference</th>
-                <th>Message</th>
-                <th>Status</th>
-                <th>Created</th>
+                <th>{t("table.severity")}</th>
+                <th>{t("table.type")}</th>
+                <th>{t("common.entityReference")}</th>
+                <th>{t("table.message")}</th>
+                <th>{t("common.status")}</th>
+                <th>{t("table.created")}</th>
               </tr>
             </thead>
             <tbody>
@@ -1666,9 +1694,9 @@ function ExceptionView({ state }: { state: WmsState }) {
                   <td className="mono">{row.entityReference}</td>
                   <td>{row.message}</td>
                   <td>
-                    <Badge>{row.status}</Badge>
+                    <StatusBadge code={row.status} />
                   </td>
-                  <td>{formatDate(row.createdAt)}</td>
+                  <td>{formatWarehouseDateTime(row.createdAt, locale, "Australia/Sydney")}</td>
                 </tr>
               ))}
             </tbody>
@@ -1680,17 +1708,13 @@ function ExceptionView({ state }: { state: WmsState }) {
 }
 
 function AdminView({ state, resource }: { state: WmsState; resource: string }) {
-  const title = resource === "erp-mapping" ? "ERP warehouse mapping" : resource[0].toUpperCase() + resource.slice(1);
+  const { t } = useI18n();
+  const title = resource === "erp-mapping" ? t("nav.erpMapping") : t(`nav.${resource}`);
   return (
     <>
       <PageHead
         title={title}
-        subtitle="Preview master data is read-only in demo mode. Production writes require Admin permission and audit logging."
-        actions={
-          <Button className="primary">
-            <Plus /> Add {resource.replace("-", " ")}
-          </Button>
-        }
+        subtitle={t("admin.subtitle")}
       />
       <div className="panel">
         {resource === "products" && (
@@ -1699,11 +1723,11 @@ function AdminView({ state, resource }: { state: WmsState; resource: string }) {
               <thead>
                 <tr>
                   <th>SKU</th>
-                  <th>Model</th>
-                  <th>Type</th>
-                  <th>Category</th>
-                  <th>SN tracking</th>
-                  <th>Status</th>
+                  <th>{t("common.model")}</th>
+                  <th>{t("table.type")}</th>
+                  <th>{t("common.category")}</th>
+                  <th>{t("common.snTracking")}</th>
+                  <th>{t("common.status")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1713,9 +1737,9 @@ function AdminView({ state, resource }: { state: WmsState; resource: string }) {
                     <td>{row.model}</td>
                     <td>{row.itemType}</td>
                     <td>{row.category}</td>
-                    <td>{row.serialTrackingRequired ? "Required" : "Not required"}</td>
+                    <td>{row.serialTrackingRequired ? t("common.requiredValue") : t("common.notRequired")}</td>
                     <td>
-                      <Badge tone="teal">{row.active ? "Active" : "Inactive"}</Badge>
+                      <StatusBadge code={row.active ? "Active" : "Inactive"} label={row.active ? t("common.active") : t("common.inactive")} tone="teal" />
                     </td>
                   </tr>
                 ))}
@@ -1728,11 +1752,11 @@ function AdminView({ state, resource }: { state: WmsState; resource: string }) {
             <table>
               <thead>
                 <tr>
-                  <th>Warehouse</th>
-                  <th>Location</th>
-                  <th>Zone</th>
-                  <th>Service zone</th>
-                  <th>Status</th>
+                  <th>{t("common.warehouse")}</th>
+                  <th>{t("common.location")}</th>
+                  <th>{t("common.zone")}</th>
+                  <th>{t("common.serviceZone")}</th>
+                  <th>{t("common.status")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1741,9 +1765,9 @@ function AdminView({ state, resource }: { state: WmsState; resource: string }) {
                     <td>{row.warehouseCode}</td>
                     <td className="mono strong">{row.code}</td>
                     <td>{row.zone}</td>
-                    <td>{row.serviceZone ? "Yes" : "No"}</td>
+                    <td>{row.serviceZone ? t("common.yes") : t("common.no")}</td>
                     <td>
-                      <Badge tone="teal">{row.active ? "Active" : "Inactive"}</Badge>
+                      <StatusBadge code={row.active ? "Active" : "Inactive"} label={row.active ? t("common.active") : t("common.inactive")} tone="teal" />
                     </td>
                   </tr>
                 ))}
@@ -1756,11 +1780,11 @@ function AdminView({ state, resource }: { state: WmsState; resource: string }) {
             <table>
               <thead>
                 <tr>
-                  <th>Code</th>
-                  <th>Name</th>
-                  <th>Timezone</th>
-                  <th>Locations</th>
-                  <th>Status</th>
+                  <th>{t("common.code")}</th>
+                  <th>{t("common.name")}</th>
+                  <th>{t("reconciliation.timezone")}</th>
+                  <th>{t("nav.locations")}</th>
+                  <th>{t("common.status")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1771,7 +1795,7 @@ function AdminView({ state, resource }: { state: WmsState; resource: string }) {
                     <td>{row.timezone}</td>
                     <td>{state.locations.filter((location) => location.warehouseCode === row.code).length}</td>
                     <td>
-                      <Badge tone="teal">{row.active ? "Active" : "Inactive"}</Badge>
+                      <StatusBadge code={row.active ? "Active" : "Inactive"} label={row.active ? t("common.active") : t("common.inactive")} tone="teal" />
                     </td>
                   </tr>
                 ))}
@@ -1780,104 +1804,93 @@ function AdminView({ state, resource }: { state: WmsState; resource: string }) {
           </div>
         )}
         {resource === "erp-mapping" && (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Physical warehouse</th>
-                  <th>ERP warehouse</th>
-                  <th>Mapped condition</th>
-                  <th>Allocation policy</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>SYD</td>
-                  <td>悉尼物料仓</td>
-                  <td>
-                    <Badge>New</Badge>
-                  </td>
-                  <td>Normal allocatable product inventory</td>
-                </tr>
-                <tr>
-                  <td>SYD</td>
-                  <td>悉尼良品仓</td>
-                  <td>
-                    <Badge>Repair_Good</Badge>
-                  </td>
-                  <td>Repair-good allocation only</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+          <ERPHealthPanel />
         )}
       </div>
     </>
   );
 }
 
-function LabelView({ order }: { order: OutboundOrder }) {
-  const line = order.lines[0];
+function LabelView({ order }: { order: OutboundOrder; state: WmsState }) {
+  const { t } = useI18n();
+  const [mode, setMode] = useState<"BATCH_LABEL" | "UNIT_SN_LABEL">("BATCH_LABEL");
+  const [labels, setLabels] = useState<Array<{
+    groupKey: string;
+    pickupCode?: string;
+    shNos: string[];
+    serialNumber?: string;
+    totalQty: number;
+    lines: Array<{ sku: string; model: string; erpWarehouse: string; qty: number }>;
+  }>>([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch(`/api/labels/preview?orderId=${encodeURIComponent(order.id)}&mode=${mode}`, {
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(t("common.loadFailed"));
+        const body = await response.json();
+        setLabels(body.labels);
+      })
+      .catch((reason) => {
+        if (reason?.name !== "AbortError") setLabels([]);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
+  }, [mode, order.id, t]);
   return (
     <div className="label-page">
       <div className="print-controls">
         <Link className="btn" href={`/outbound/${order.id}`}>
-          <ArrowLeft /> Back to order
+          <ArrowLeft /> {t("label.backToOrder")}
         </Link>
-        <Button className="primary" onClick={() => window.print()}>
-          <Printer /> Print A4 label
+        <div className="label-mode-switch" role="group" aria-label={t("label.previewTitle")}>
+          <Button className={mode === "BATCH_LABEL" ? "primary" : ""} onClick={() => { setLoading(true); setMode("BATCH_LABEL"); }}>
+            {t("label.pickupBatch")}
+          </Button>
+          <Button className={mode === "UNIT_SN_LABEL" ? "primary" : ""} onClick={() => { setLoading(true); setMode("UNIT_SN_LABEL"); }}>
+            {t("label.unitSn")}
+          </Button>
+        </div>
+        <Button className="primary" disabled={loading || !labels.length} onClick={() => window.print()}>
+          <Printer /> {t("action.printA4")}
         </Button>
       </div>
-      <article className="label-sheet">
-        <div className="label-brand">FOXESS · WAREHOUSE OPERATIONS</div>
+      <div className="notice">{t("label.previewHelp")}</div>
+      {loading && <div className="page-loading">{t("common.loading")}</div>}
+      {!loading && !labels.length && <Empty label={mode === "UNIT_SN_LABEL" ? t("scanner.waiting") : t("common.noResults")} />}
+      {labels.map((label) => (
+      <article className="label-sheet" key={label.groupKey}>
+        <div className="label-brand">FOXESS · {t("label.warehouseOperations")}</div>
         <div>
           <section className="label-main">
-            <div className="label-kicker">Service outbound · SH</div>
-            <div className="label-sh">{order.shNo}</div>
+            <div className="label-kicker">{mode === "BATCH_LABEL" ? t("label.pickupBatch") : t("label.unitSn")}</div>
+            <div className="label-sh">{label.shNos.join(" · ")}</div>
             <div className="label-pickup">
-              <span>Pickup</span>
-              <strong>{order.pickupCode ?? "PENDING"}</strong>
+              <span>{label.pickupCode ? t("common.pickup") : t("label.shNumbers")}</span>
+              <strong>{label.pickupCode ?? label.shNos.join(" · ")}</strong>
             </div>
+            {label.serialNumber && <div className="label-serial mono">{label.serialNumber}</div>}
           </section>
           <section className="label-details">
-            <LabelDetail label="SKU" value={line.sku} />
-            <LabelDetail label="Model" value={line.model} />
-            <LabelDetail label="ERP Warehouse" value={order.erpWarehouse} />
-            <div className="label-detail label-qty">
-              <span>Qty</span>
-              <strong>{line.requiredQty}</strong>
-            </div>
+            {label.lines.map((line) => (
+              <div className="label-detail" key={`${line.sku}:${line.model}:${line.erpWarehouse}`}>
+                <span>{line.sku} · {line.model}</span>
+                <strong>{line.erpWarehouse === "Unmapped" ? t("status.Unmapped") : line.erpWarehouse} · {t("common.quantityShort")} {line.qty}</strong>
+              </div>
+            ))}
+            <div className="label-total"><span>{t("label.totalQty")}</span><strong>{label.totalQty}</strong></div>
           </section>
         </div>
-        <div className="label-brand">BATCH LABEL · 1 LABEL / 1 A4 PAGE</div>
+        <div className="label-brand">{t("label.batchFooter")}</div>
       </article>
+      ))}
     </div>
   );
-}
-
-function LabelDetail({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="label-detail">
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
-}
-
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat("en-AU", {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: "Australia/Sydney",
-  }).format(new Date(value));
-}
-
-function formatTime(value: string) {
-  return new Intl.DateTimeFormat("en-AU", {
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: "Australia/Sydney",
-  }).format(new Date(value));
 }
 
 // Exported for focused UI tests and future server/client separation.

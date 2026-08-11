@@ -1,7 +1,9 @@
 # ERP Integration
 
-`ERPAdapter` defines server-side lookup, order retrieval, transfer retrieval and write-back. Sprint 1 uses `MockERPAdapter`; browser components do not instantiate adapters.
+`ERPAdapter` defines server-side replacement-order lookup, faulty-SN lookup, transfer retrieval and write-back. The Preview uses `MockERPAdapter`; browser components never instantiate an adapter or contain vendor-specific rules.
 
-Faulty lookup failure creates an operational exception and does not invent SKU, model or SH data. Outbound and transfer confirmation create durable sync jobs. External failure is handled by Failed/Retrying/Manual Review state in later workers and never rewrites confirmed physical history.
+Replacement outbound import reads ERP Replacement Unit Information only. An ERP Pickup Code is preserved when present; otherwise WMS issues one atomically at preparation. ERP warehouse classification is stored separately from physical warehouse and location.
 
-Production Kingdee connectivity, credentials, retry workers and webhook reconciliation remain Sprint 2 scope.
+Faulty lookup failure creates an operational exception and never invents SKU, model or SH data. Outbound and transfer confirmation create durable sync jobs. External failure is handled through retry/manual review and never rewrites confirmed physical history.
+
+Production Kingdee connectivity, credentials, retry workers, rate limiting and webhook reconciliation remain future integration work. The boundary and durable sync jobs are already present so integration does not change inventory semantics.

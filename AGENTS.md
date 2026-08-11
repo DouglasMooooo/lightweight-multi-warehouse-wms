@@ -17,6 +17,20 @@ This repository is a real operational Warehouse Management System Preview based 
 - Business logic stays outside React UI components.
 - Current inventory comes from controlled balance updates, reconciled to the immutable transaction ledger.
 - Never modify `reference/SYD_WMS_current_reference.xlsx`.
+- Map workbook columns by semantic header, never by a hard-coded Excel coordinate.
+- Spreadsheet occupancy placeholders (for example Qty 99 rows marked as display-only) are not inventory.
+- Actual outbound reporting uses `outboundAt`, never import, creation or preparation time.
+- Product reporting eligibility comes from `reportMachine`; it is independent of Product/Material item type.
+- Native Repair completion is valid only from `In_Repair`.
+- `Returned_Unrepaired` stays in Repair status/condition and is never allocatable stock.
+- Serial registration binds identity to existing Physical Qty and never increases inventory.
+- Use the shared physically-present SN policy for capacity checks and reconciliation.
+- Physically present SN statuses include `Scrapped`; allocatability is a separate, stricter policy.
+- Shadow workbook imports are server-side, semantic-header based, checksum-idempotent and never automatic in production.
+- Domain/database codes are never translated. English and Simplified Chinese exist only in the presentation layer.
+- Business dates are interpreted and displayed in the selected warehouse timezone, never implicitly in the browser timezone.
+- Preview/staging deployments must never connect to a production database; environment metadata is mandatory on Vercel.
+- Scanner-first fields submit on Enter, prevent rapid duplicates, preserve context on errors and restore focus.
 - Run tests, typecheck, lint and the production build before completing changes.
 
 ## Sydney rules
@@ -36,5 +50,8 @@ This repository is a real operational Warehouse Management System Preview based 
 13. Label generation never modifies inventory.
 14. Pickup code generation never modifies physical inventory.
 15. ERP write-back failure never silently undoes a confirmed physical operation.
+16. A workbook Prepared row without a known physical source is Pending Allocation, not frozen inventory.
+17. Legacy traceability gaps must be distinguished from current operational reconciliation errors.
+18. `returnedToStockAt` means return to usable stock and is set only for Repair_Good.
 
 Read `docs/BUSINESS_RULES.md` and `docs/ASSUMPTIONS.md` before changing inventory, outbound, Move, SN, repair-return, Prepared/Frozen, label or transfer behaviour.

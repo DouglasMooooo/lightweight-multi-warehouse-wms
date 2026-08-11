@@ -1,0 +1,143 @@
+{
+  "bulk.title": "Bulk SN Operations",
+  "bulk.subtitle": "Choose the warehouse operation first. Stock condition and inventory effects are controlled by that workflow.",
+  "bulk.mode.newInbound": "New Stock Inbound",
+  "bulk.mode.faultyReceiving": "Faulty Machine Receiving",
+  "bulk.mode.repairGood": "Repair-Good Registration",
+  "bulk.mode.outbound": "Outbound SN Assignment",
+  "bulk.mode.bindExisting": "Bind SN to Existing Stock",
+  "bulk.modeHelp.NEW_INBOUND": "Receive new physical stock and create the supplied serial identities in one batch.",
+  "bulk.modeHelp.FAULTY_RECEIVING": "Validate faulty units independently and receive valid rows into the Repair workflow.",
+  "bulk.modeHelp.LEGACY_REPAIR_GOOD": "Controlled legacy recognition only; tracked RepairJobs must use normal completion.",
+  "bulk.modeHelp.OUTBOUND": "Open an active SH and manage each serial-tracked line independently.",
+  "bulk.modeHelp.BIND_EXISTING": "Create serial identities against existing Physical Qty without increasing stock.",
+  "bulk.back": "Back to operations",
+  "bulk.outboundHelp": "Each outbound line keeps its own required condition, required quantity and assigned serial count.",
+  "bulk.assigned": "Assigned SN",
+  "bulk.manageSn": "Manage SN",
+  "bulk.expectedQty": "Expected Qty",
+  "bulk.sourceDocument": "Inbound / reference document",
+  "bulk.legacyReasonPlaceholder": "Explain why native repair history is unavailable",
+  "bulk.scan": "Scanner",
+  "bulk.scanPlaceholder": "Scan an SN and press Enter",
+  "bulk.addSn": "Add SN",
+  "bulk.serialNumbers": "Serial numbers",
+  "bulk.detected": "{count} detected",
+  "bulk.upload": "Upload CSV/XLSX",
+  "bulk.validate": "Validate",
+  "bulk.confirm": "Confirm",
+  "bulk.validation": "Validation",
+  "bulk.validationSummary": "{total} submitted · {valid} valid · {invalid} needs attention",
+  "bulk.capacitySummary": "Physical {physical} · Registered SN {registered} · Remaining capacity {capacity}",
+  "bulk.destination": "Destination",
+  "bulk.result": "Result",
+  "bulk.result.VALID": "Valid",
+  "bulk.result.DUPLICATE_IN_BATCH": "Duplicate input",
+  "bulk.result.SN_ALREADY_EXISTS": "SN already exists",
+  "bulk.result.QUANTITY_MISMATCH": "Quantity mismatch",
+  "bulk.result.REGISTRATION_CAPACITY_EXCEEDED": "Capacity exceeded",
+  "bulk.result.UNKNOWN_SN_CAN_REGISTER": "Unknown SN can register",
+  "bulk.result.ERP_NOT_FOUND": "ERP not found",
+  "bulk.result.DUPLICATE_RETURN": "Duplicate return",
+  "bulk.result.ALREADY_IN_REPAIR": "Already in Repair",
+  "bulk.result.SKU_MISMATCH": "SKU mismatch",
+  "bulk.result.MANUAL_REVIEW": "Manual Review",
+  "bulk.validationFailed": "Batch validation failed.",
+  "bulk.commitFailed": "Batch confirmation failed.",
+  "bulk.success.inbound": "{count} {sku} units received at {location}. Batch {batch}.",
+  "bulk.success.faulty": "{count} faulty units received; {attention} need attention. Batch {batch}.",
+  "bulk.success.repairGood": "{count} Repair_Good units recognized. Batch {batch}.",
+  "bulk.success.bound": "{count} serial identities bound. Physical Qty is unchanged.",
+  "common.previous": "Previous",
+  "common.next": "Next",
+  "common.rowsPage": "{rows} rows · page {page} / {pages}",
+  "common.language": "Language",
+  "common.closeNavigation": "Close navigation",
+  "common.openNavigation": "Open navigation",
+  "common.warehouseUser": "Warehouse User",
+  "common.viewer": "Viewer",
+  "common.resetDemo": "Reset demo data",
+  "common.orderNotFound": "Order not found.",
+  "common.pickup": "Pickup",
+  "common.required": "Required",
+  "common.allocated": "Allocated",
+  "common.prepared": "Prepared",
+  "common.dispatched": "Dispatched",
+  "common.pendingBatch": "Pending batch",
+  "common.addPastedList": "Add pasted list",
+  "common.result": "Result",
+  "common.category": "Category",
+  "common.snTracking": "SN tracking",
+  "common.requiredValue": "Required",
+  "common.notRequired": "Not required",
+  "common.zone": "Zone",
+  "common.serviceZone": "Service zone",
+  "common.code": "Code",
+  "common.name": "Name",
+  "common.entityReference": "Entity reference",
+  "common.quantityShort": "Qty",
+  "common.physicalWarehouse": "Physical warehouse",
+  "common.erpWarehouse": "ERP warehouse",
+  "common.mappedCondition": "Mapped condition",
+  "common.allocationPolicy": "Allocation policy",
+  "common.atomic": "Atomic",
+  "common.supervisor": "Supervisor",
+  "common.onlyMatchingCondition": "Only available stock matching the required condition",
+  "receiving.faultyNotice": "Faulty receipts use ERP SN lookup and default to the Sydney repair location.",
+  "receiving.transferNotice": "Transfer receipt reduces In Transit and increases destination physical inventory.",
+  "repair.preserveSn": "The same known SN is preserved through Repair → Repair_Good.",
+  "adjustment.neverOverwrite": "Never overwrite a balance",
+  "adjustment.neverOverwriteHelp": "Every correction creates an Adjustment_In or Adjustment_Out ledger entry.",
+  "adjustment.productRequiresSku": "Product requires SKU",
+  "adjustment.productRequiresSkuHelp": "Blank SKU is permitted only for unmonitored material with the controlled reason.",
+  "adjustment.moveSeparate": "Move is separate",
+  "adjustment.moveSeparateHelp": "Use Move when stock has a known source and destination.",
+  "transfer.destinationPending": "Destination pending",
+  "exception.severityLabel": "{severity} severity",
+  "admin.normalAllocation": "Normal allocatable product inventory",
+  "admin.repairGoodAllocation": "Repair-good allocation only",
+  "label.backToOrder": "Back to order",
+  "label.warehouseOperations": "WAREHOUSE OPERATIONS",
+  "label.serviceOutbound": "Service outbound · SH",
+  "label.batchFooter": "BATCH LABEL · 1 LABEL / 1 A4 PAGE",
+  "receiving.traceableHelp": "Required for a traceable Product unit. Scanner input behaves as keyboard entry.",
+  "receiving.scanPlaceholder": "Scan or enter SN",
+  "receiving.openTransfers": "Open transfers",
+  "receiving.standardSuccess": "Standard inbound recorded and inventory updated.",
+  "reconciliation.adminShadowSeed": "Admin shadow seed",
+  "common.counting": "Counting",
+  "outbound.preparedPhysicalHelp": "Frozen {frozen}. Physical stock remains unchanged until Confirm Dispatch.",
+  "common.notAllocated": "Not allocated",
+  "common.outsideWms": "Outside WMS inventory",
+  "outbound.pastePlaceholder": "Paste an Excel column or newline, comma or tab-separated serials"
+  ,"success.demoReset": "Demo database restored to the validated starting state."
+  ,"success.outboundImported": "{sh} imported as Pending Allocation; no stock frozen."
+  ,"success.outboundDispatched": "{sh} dispatched; ERP sync queued."
+  ,"success.outboundPrepared": "{sh} physical preparation confirmed; frozen stock updated."
+  ,"success.outboundAllocated": "{count} units allocated at {location}; Physical and Frozen Qty are unchanged."
+  ,"success.faultyReceived": "{sn} received to REPAIR-01 with status Repair."
+  ,"success.repairStarted": "{item} moved to In Repair."
+  ,"success.repairCompleted": "{item} completed as Repair_Good at FLEX-01."
+  ,"success.move": "Move completed atomically. Warehouse total is unchanged."
+  ,"success.adjustment": "Adjustment transaction recorded and current stock updated."
+  ,"success.transferDispatched": "{transfer} dispatched; serial is now In Transit."
+  ,"success.transferReceived": "{transfer} received into MEL at M1-1-1-L."
+  ,"outbound.importSh": "SH number to import"
+  ,"outbound.importExample": "Try SH-2607-00175722"
+  ,"outbound.step.erp": "ERP order"
+  ,"outbound.step.allocated": "Allocated"
+  ,"outbound.step.prepared": "Prepared"
+  ,"outbound.step.sn": "SN scanned"
+  ,"outbound.step.dispatched": "Dispatched"
+  ,"common.allocate": "Allocate"
+  ,"outbound.registerAndAssign": "Register and Assign"
+  ,"outbound.confirmSn": "Confirm {count} SN"
+  ,"outbound.pickupWhenPrepared": "Generated when fully prepared"
+  ,"summary.erpStatus": "ERP status"
+  ,"summary.faultyReceipts": "Faulty receipts recorded"
+  ,"repair.unknownLegacySn": "Unknown legacy SN"
+  ,"move.availableAt": "Available at {location}"
+  ,"adjustment.skuHelp": "May be omitted only for controlled unmonitored Material."
+  ,"scanner.searchPlaceholder": "SN, SH, Pickup Code or SKU → Enter"
+  ,"reconciliation.workflow": "Reconciliation workflow"
+}

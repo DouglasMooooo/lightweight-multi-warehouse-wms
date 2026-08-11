@@ -1,6 +1,7 @@
 # Business Rules
 
-- Prepared leaves Physical unchanged, increases Frozen and decreases calculated Available.
+- Normal outbound preparation is one atomic command: confirm source location, exact quantity and required SNs, create allocation evidence, increase Frozen, preserve Physical, and re-evaluate order readiness.
+- SN capture is part of preparation. A normally processed serial-tracked line never requires a second “Complete SN” action.
 - Dispatch consumes the exact allocation locations, decreases Physical and Frozen, and requires all serial-tracked units.
 - Outbound SN validation checks SKU, condition, warehouse, allocated location, eligible status and other active allocations.
 - A faulty SN already in Repair or linked to an active RepairReturn is rejected.
@@ -10,3 +11,36 @@
 - Transfer requires different warehouses. Transfer Out changes SN to In_Transit; Transfer In changes it to In_Stock at the destination.
 - Historical stock transactions are append-only in application workflows.
 - ERP warehouse classification never replaces physical warehouse/location.
+- ERP Replacement Unit Information import creates `Pending_Allocation` demand only. It never freezes inventory and never reads Faulty Unit Information as the replacement SKU.
+- Allocation requires a physical location and creates relational demand against eligible stock; allocation alone changes neither Physical nor Frozen.
+- Legacy `Prepared` records may retain their existing allocation-first evidence for exception review. New normal preparation does not expose Allocate, Confirm Prepared and Complete SN as separate operator actions.
+- Actual dispatch sets `OutboundOrder.outboundAt`; outbound reporting never substitutes `createdAt`.
+- Import, allocation, preparation and pickup readiness have separate timestamps and cannot stand in for actual dispatch.
+- One order line may allocate across several locations and may carry unit-level SN assignments without duplicating the order line.
+- A Pickup Code identifies one batch that may contain several SH documents, SKUs, models and ERP warehouses. Batch label rows aggregate only identical SKU + Model + ERP Warehouse values.
+- Faulty receipt creates a native RepairJob. Complete Repair reclassifies the same known serial from Repair to Repair_Good and returns it to `In_Stock` at a selected location.
+- Historical Repair_Good with no known repair record uses the explicit Legacy / Manual Recognition operation; it does not fabricate a repair lifecycle.
+- Spreadsheet reconciliation is read-only and never posts inventory adjustments automatically.
+- `reportMachine` is an explicit Product-master flag and is independent of `itemType`; reportable Material SKUs are valid.
+- Workbook rows explicitly marked as physical-location occupancy displays are excluded from inventory and reconciliation quantities.
+- SN reconciliation reports missing, wrong-location, wrong-condition and status mismatches, classifying known historical gaps separately from current errors.
+- Native Repair must transition `Pending_Repair -> In_Repair` before completion; direct completion is rejected.
+- Returned_Unrepaired remains condition Repair with serial status Repair at a service/holding location. It is non-allocatable and has no `returnedToStockAt`.
+- Scrap remains non-allocatable, preserves one unit in Scrap inventory until a future controlled disposal flow, and has no `returnedToStockAt`.
+- `registerSerial` assigns an SN to unrepresented existing Physical Qty. It never changes a balance and rejects non-serial-tracked products or exhausted capacity.
+- Physically-present SN statuses are In_Stock, Prepared, Repair and Scrapped. Outbound and In_Transit do not count against Physical Qty.
+- Physical presence and outbound allocatability are separate policies. Scrapped remains physical but is never allocatable.
+- Shadow reconciliation and DRY_RUN never mutate inventory. SHADOW_SEED is explicit non-production opening import with ledger and audit evidence.
+- Operator-facing normal outbound stages are To Prepare, Partially Prepared (multi-line work only), Awaiting Pickup, Outbound and ERP outcome. Raw `Prepared` is shown only as a legacy/incomplete SN Pending exception; it is not a normal step.
+- `Ready_for_Pickup` requires every line to have exact prepared and allocated quantity, confirmed prepared locations and, for serial-tracked products, exactly one authoritative Prepared SN per required unit at the allocated warehouse/location with matching SKU and condition.
+- Awaiting Pickup displays assigned locations and SNs as read-only evidence and never requests an ordinary second scan.
+- The final valid preparation-stage SN commit re-evaluates the whole order and automatically promotes it to `Ready_for_Pickup`. Dispatch reuses those assignments and never requires an ordinary second pickup scan.
+- Confirm Dispatch is accepted only from `Ready_for_Pickup`, rechecks the authoritative allocations and SN relations inside the transaction, reduces Physical and Frozen, marks assigned SNs Outbound, records ledger/audit evidence and queues ERP write-back.
+- Scanner-based Transfer Out groups valid SNs by Product + Condition and posts one atomic transfer operation. Transfer receipt preserves condition and requires explicit destination physical location.
+- Label preview and printing are read-only output operations. Pickup Code produces one A4 batch label; missing Pickup Code falls back to SH No; Unit SN labels are explicit opt-in.
+- Operational exceptions belong to an explicit physical warehouse. Warehouse dashboards, maps, exception queues and reports exclude legacy unscoped exceptions rather than attributing them to an invented warehouse.
+- Historical closing Physical, Frozen, In Transit and condition balances are reported only when an Opening ledger baseline exists before the requested period. Condition balances are reconstructed by reversing later ledger deltas, including explicit Repair-to-target condition transitions.
+- When a historical opening baseline does not exist, the report returns no historical inventory value and presents `Historical closing inventory unavailable: insufficient opening ledger baseline`; current InventoryBalance must never be substituted.
+- Dashboard `Sellable Available Units` means Product inventory in New or Repair_Good less Frozen. Product Inventory Report `Physical Available Units` means Physical less Frozen within its active item scope, including Repair when Product is selected.
+- Warehouse Map defaults to all inventory units, including Product and Material. Product Inventory Report defaults to Product and must keep the selected item scope visible.
+- `DEMO-TRANSFER-001` is a non-production-only, synthetic fixture. Its four dedicated `DEMO-TRANSFER-*` SNs may be used for destructive rehearsal; the fixture script must never reset an SN that has entered a workflow or touch operational stock.

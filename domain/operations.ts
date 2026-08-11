@@ -1,4 +1,9 @@
 import { DomainError } from "./errors";
+import {
+  assertSerialRegistrationCapacity,
+  isPhysicallyPresentSerialStatus,
+  registeredSerialStatusForCondition,
+} from "./serial-policy";
 import type {
   InventoryBalance,
   StockCondition,
@@ -495,23 +500,54 @@ export function receiveTransfer(source: WmsState, transferId: string, destinatio
 
 export function registerSerial(
   source: WmsState,
-  input: { serialNumber: string; sku: string; warehouseCode: WarehouseCode; locationCode: string },
+  input: {
+    serialNumber: string;
+    sku: string;
+    warehouseCode: WarehouseCode;
+    locationCode: string;
+    condition?: StockCondition;
+  },
 ) {
   const state = copy(source);
-  if (state.serials.some((row) => row.serialNumber === input.serialNumber && row.status !== "Scrapped"))
-    throw new DomainError("Serial number already exists.");
+  const normalized = input.serialNumber.trim().toUpperCase();
+  if (state.serials.some((row) => row.serialNumber.trim().toUpperCase() === normalized))
+    throw new DomainError("Serial number already exists.", "DUPLICATE_SERIAL_NUMBER");
   const product = state.products.find((row) => row.sku === input.sku);
   if (!product) throw new DomainError("Unknown SKU.");
   requireLocation(state, input.warehouseCode, input.locationCode);
+  const condition = input.condition ?? "New";
+  const physicalQty = state.inventory
+    .filter(
+      (row) =>
+        row.sku === input.sku &&
+        row.warehouseCode === input.warehouseCode &&
+        row.locationCode === input.locationCode &&
+        row.condition === condition,
+    )
+    .reduce((sum, row) => sum + row.physicalQty, 0);
+  const activePhysicalSerialCount = state.serials.filter(
+    (row) =>
+      row.sku === input.sku &&
+      row.warehouseCode === input.warehouseCode &&
+      row.locationCode === input.locationCode &&
+      row.condition === condition &&
+      isPhysicallyPresentSerialStatus(row.status),
+  ).length;
+  assertSerialRegistrationCapacity({
+    serialTrackingRequired: product.serialTrackingRequired,
+    physicalQty,
+    activePhysicalSerialCount,
+  });
+  const registeredStatus = registeredSerialStatusForCondition(condition);
   state.serials.push({
     id: id("sn"),
-    serialNumber: input.serialNumber,
+    serialNumber: normalized,
     sku: input.sku,
     model: product.model,
     warehouseCode: input.warehouseCode,
     locationCode: input.locationCode,
-    condition: "New",
-    status: "In_Stock",
+    condition,
+    status: registeredStatus,
   });
   return state;
 }

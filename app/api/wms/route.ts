@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { DomainError } from "@/domain/errors";
 import type { WmsCommand } from "@/domain/types";
+import { timed } from "@/lib/performance";
 import { WmsApplicationService } from "@/services/server/wms-service";
 
 export const runtime = "nodejs";
@@ -11,12 +12,22 @@ const condition = z.enum(["New", "Repair_Good", "Repair", "Scrap", "Material"]);
 const warehouse = z.enum(["SYD", "MEL", "BNE"]);
 const commandSchema = z.discriminatedUnion("type", [
   z.object({
-    type: z.literal("prepareOutbound"),
+    type: z.literal("importOutbound"),
+    shNo: z.string().min(1),
+  }),
+  z.object({
+    type: z.literal("allocateOutbound"),
     orderId: z.string().min(1),
     lineId: z.string().min(1),
     locationCode: z.string().min(1),
     qty: z.number().positive(),
     containerCode: z.string().optional(),
+  }),
+  z.object({
+    type: z.literal("prepareOutbound"),
+    orderId: z.string().min(1),
+    lineId: z.string().min(1),
+    allocationIds: z.array(z.string().min(1)).optional(),
   }),
   z.object({
     type: z.literal("scanOutboundSerial"),
@@ -48,6 +59,28 @@ const commandSchema = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("receiveFaulty"), serialNumber: z.string().min(1) }),
   z.object({
+    type: z.literal("startRepair"),
+    repairJobId: z.string().min(1),
+    remark: z.string().min(1),
+  }),
+  z.object({
+    type: z.literal("completeRepair"),
+    repairJobId: z.string().min(1),
+    targetLocationCode: z.string().min(1),
+    outcome: z.enum(["Repair_Good", "Scrap", "Returned_Unrepaired"]),
+    remark: z.string().min(1),
+  }),
+  z.object({
+    type: z.literal("legacyRepairGoodIn"),
+    warehouseCode: warehouse,
+    locationCode: z.string().min(1),
+    sku: z.string().min(1),
+    qty: z.number().positive(),
+    reason: z.string().min(1),
+    remark: z.string().min(1),
+    serialNumber: z.string().optional(),
+  }),
+  z.object({
     type: z.literal("moveStock"),
     warehouseCode: warehouse,
     sku: z.string().min(1),
@@ -70,12 +103,21 @@ const commandSchema = z.discriminatedUnion("type", [
 function errorResponse(error: unknown) {
   const message = error instanceof Error ? error.message : "Warehouse operation failed.";
   const status = error instanceof DomainError || error instanceof z.ZodError ? 400 : 500;
-  return NextResponse.json({ error: message }, { status });
+  const code =
+    error instanceof DomainError
+      ? error.code
+      : error instanceof z.ZodError
+        ? "INVALID_COMMAND"
+        : "INTERNAL_ERROR";
+  return NextResponse.json({ error: message, code }, { status });
 }
 
 export async function GET() {
   try {
-    return NextResponse.json(await new WmsApplicationService().snapshot());
+    return NextResponse.json(await timed(
+      { route: "GET /api/wms", queryName: "legacyFullSnapshot" },
+      () => new WmsApplicationService().snapshot(),
+    ));
   } catch (error) {
     return errorResponse(error);
   }
@@ -84,7 +126,10 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const command = commandSchema.parse(await request.json()) as WmsCommand;
-    return NextResponse.json(await new WmsApplicationService().execute(command));
+    return NextResponse.json(await timed(
+      { route: "POST /api/wms", queryName: `command:${command.type}` },
+      () => new WmsApplicationService().execute(command),
+    ));
   } catch (error) {
     return errorResponse(error);
   }
