@@ -2,7 +2,20 @@
 
 Status: **Proposal for first-round leadership discussion; not an implementation specification or delivery commitment.**
 
-This proposal concerns WMS workflow redesign. ERP remains the source of business documents; WMS focuses on warehouse execution, SN traceability, physical location, task workflow, audit and exception handling. It does not propose replacing ERP or redesigning ERP as a whole.
+This proposal concerns WMS workflow redesign. ERP remains the source of business documents; WMS focuses on warehouse execution, SN traceability, physical location, task workflow, audit and exception handling. The scope is WMS workflow redesign only; replacing ERP or redesigning ERP architecture is outside this proposal.
+
+## Current Operational Pain Points
+
+The current operational process has the following pain points; these describe day-to-day work, not additional claims about the browser Prototype's implementation:
+
+- Label printing is still manual and time-consuming.
+- ERP order/data entry is still manual in parts of the current process.
+- Signed pickup sheets must be collected and organized one by one.
+- WMS server or synchronization issues can block outbound operations.
+- WMS → ERP write-back can fail.
+- ERP batch-number / quantity matching can fail.
+- Physical outbound and digital system status can become temporarily inconsistent.
+- Warehouse staff often need to investigate across WMS, ERP and spreadsheets manually.
 
 ## Current prototype and proposed next state
 
@@ -26,7 +39,7 @@ The sections below describe **proposed next-state behaviour**, including extensi
 - `InventoryBalance` is quantity authority, maintained by controlled operations and reconciled to the immutable `StockTransaction` ledger.
 - `SerialNumber` provides identity traceability; it is not the quantity source of truth. SN counts must not replace balance quantities.
 - Prepared increases Frozen Qty without reducing Physical Qty. Pickup codes and labels do not change inventory.
-- A confirmed physical warehouse event commits before ERP write-back. ERP failure becomes a visible exception with retry/manual review, never a silent rollback of physical execution.
+- A confirmed physical warehouse event commits before downstream ERP/status integration. Confirmed physical events remain visible and auditable even if integration fails; failures become visible exceptions for retry/manual review, never a silent rollback of physical execution.
 - Important state changes require audit records. Unknown SKU, SN, location or ERP results must not be guessed.
 
 ## Proposed outbound workflow
@@ -38,15 +51,15 @@ The sections below describe **proposed next-state behaviour**, including extensi
 5. Confirm preparation after successful validation and update the task/order to Ready for Pickup when all required units are prepared. Retain Physical Qty and increase Frozen Qty through the controlled preparation operation. This scan-before-confirmation sequence is a proposed change to the current Preview sequence.
 6. Route the prepared task to logistics pickup or engineer self-pickup.
 7. Confirm physical pickup, generate its audit record and trigger downstream WMS order/task, inventory and SN status updates. Where pickup is the final dispatch event, reduce Physical and Frozen quantities and mark the SNs Outbound once; prevent a separate dispatch action from posting the same movement again.
-8. Queue the corresponding ERP/after-sales status write-back after the physical event commits. Show Pending/Failed status and retry exceptions without undoing the pickup.
+8. After the physical event commits, trigger the required downstream ERP/status integration according to the current enterprise process. Keep integration failures visible for retry/manual review without undoing the pickup or losing its audit record.
 
 ## Proposed Identity Pickup / Digital Pickup
 
-- Engineer self-pickup requires company/Ruiyun identity authentication and authorization linked to the relevant after-sales order. The current Demo Supervisor context does not satisfy this requirement.
-- A logistics driver can identify the pickup by entering or scanning the pickup order number. Validate the order and its readiness before confirming the physical handover; an order number alone is not engineer identity authentication.
+- Engineer self-pickup requires company/Ruiyun identity authentication linked to the relevant after-sales/order authorization. The engineer scans to confirm collection, producing an auditable custody record. The current Demo Supervisor context does not satisfy this requirement.
+- Logistics driver pickup does not require company employee identity. The driver enters or scans the pickup order number; the system validates that the order is ready and valid. Confirmation records the physical handover and advances the workflow. The pickup order number identifies the order and does not provide strong personal identity authentication.
 - Each confirmation should generate an auditable pickup record containing the order/after-sales reference, pickup code, pickup route, collector identity or driver details, confirming actor, timestamp and handed-over SNs/quantities.
 - Repeated confirmation must reference the existing result rather than duplicate inventory or downstream status updates. Identity, order and handover mismatches go to visible exceptions.
-- Identity integration, driver verification and downstream status mapping require design agreement; none is claimed as a completed production integration.
+- Company/Ruiyun identity linkage, logistics handover checks and downstream status mapping require agreement within the current enterprise process; none is claimed as a completed production integration.
 
 ## Proposed faulty receiving workflow
 
@@ -54,7 +67,7 @@ The sections below describe **proposed next-state behaviour**, including extensi
 2. Look up WMS history and the original ERP SH through the adapter boundary.
 3. Identify SKU, model and the original/faulty/replacement relationship from those records. Do not infer missing values or use replacement details as the faulty item's identity.
 4. Require the operator to confirm the actual receiving warehouse and physical location, for example `REPAIR-01` (Repair-01), even when lookup succeeds.
-5. Confirm valid physical receipts through controlled balance, SN, transaction and audit updates into Repair stock, then queue any ERP write-back.
+5. Confirm valid physical receipts through controlled balance, SN, transaction and audit updates into Repair stock, then trigger the required downstream ERP/status integration according to the current enterprise process.
 6. Route unknown SNs, duplicates and status mismatches to exceptions/manual review. Keep unresolved entries visible rather than silently accepting, dropping or guessing them.
 
 ## Proposed Transfer versus Repair-to-Good
@@ -79,7 +92,7 @@ The transfer reference and expected list must not be recreated at the receiving 
 
 ## Future reporting and AI
 
-Structured order, SN, location, task, exception and audit data should enable automated weekly/monthly operational reports with traceable source records.
+Structured order, SN, location, task, exception and audit data should enable automated weekly/monthly operational reports with traceable source records. Future automated reporting and AI assistance are outside the MVP critical path.
 
 A future AI agent could answer management questions and help analyze exceptions using that data. AI assistance is outside the MVP critical path and must not become quantity authority or silently change warehouse records.
 
