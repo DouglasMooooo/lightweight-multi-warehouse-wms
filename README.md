@@ -4,6 +4,10 @@ A task-oriented warehouse execution Preview for Sydney operations, shaped for fu
 
 The Preview includes working browser-based demo workflows for current stock, Prepared/Frozen outbound, pickup labels, SN scanning and dispatch, faulty returns, atomic Move, controlled Adjustment, SN traceability, SYD → MEL transfer, stocktake counts, audit and exceptions. Demo changes persist in the browser and can be reset from the header.
 
+## Workflow redesign proposal
+
+The [Proposed WMS Workflow Redesign v1](docs/PROPOSED_WORKFLOW_REDESIGN.md) separates current Prototype capabilities from proposed next-state workflows for first-round leadership discussion. It is a proposal, not an implementation claim. ERP remains the source of business documents; WMS focuses on warehouse execution, SN traceability, physical location, task workflow, audit and exceptions.
+
 ## Quick start — no database required
 
 Requirements: Node.js 20.9+ and pnpm.
