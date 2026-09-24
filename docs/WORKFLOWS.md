@@ -1,5 +1,7 @@
 # Workflows
 
+The workflows below describe the current Prototype baseline, not the proposed redesign. For proposed mobile/PDA preparation, identity/digital pickup, bulk faulty receiving, two-sided transfer scanning and repair condition conversion, see [Proposed WMS Workflow Redesign v1](PROPOSED_WORKFLOW_REDESIGN.md). Those extensions are not claimed as implemented here.
+
 ## Prepare and dispatch
 
 1. Load ERP/SH order and its Replacement Unit Information.

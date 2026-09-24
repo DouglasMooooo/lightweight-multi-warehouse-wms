@@ -1,6 +1,14 @@
 # Business rules
 
+## System boundaries
+
+- ERP remains the source of business documents.
+- WMS focuses on warehouse execution, SN traceability, physical location, task workflow, audit and exception handling; it is not an ERP replacement.
+
 ## Inventory quantities
+
+- `InventoryBalance` is quantity authority, maintained by controlled operations and reconciled to the immutable transaction ledger.
+- `SerialNumber` is identity traceability, not the quantity source of truth.
 
 - Physical Qty is stock physically present.
 - Frozen Qty is stock reserved by Prepared outbound.
@@ -44,4 +52,4 @@ Prepared records the reservation quantity with zero physical delta and a positiv
 
 ## ERP resilience
 
-A confirmed physical operation is committed before ERP write-back. Pending or failed write-back remains in the sync queue and exception list.
+A confirmed physical operation is committed before ERP write-back. Pending or failed write-back remains in the sync queue and exception list for visible retry/manual review; ERP failure never silently rolls back the confirmed physical event.

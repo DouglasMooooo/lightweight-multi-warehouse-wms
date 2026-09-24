@@ -2,6 +2,8 @@
 
 Legend: **v0.1** implemented in Preview; **Next** recommended next sprint.
 
+The [Proposed WMS Workflow Redesign v1](PROPOSED_WORKFLOW_REDESIGN.md) records next-state ideas for first-round leadership discussion separately from this baseline backlog. Proposal items are not implemented or automatically committed to the next sprint; future AI assistance is outside the MVP critical path.
+
 ## EPIC 1 — Inventory Core
 
 - **v0.1** Physical/Frozen/Available/In Transit model, atomic Move and controlled Adjustment.
