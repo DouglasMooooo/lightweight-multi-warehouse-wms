@@ -144,6 +144,7 @@ export function AppShell({
           <div><strong>{t("app.name")}</strong><span>{t("app.version")} · v0.1</span></div>
           {sidebarOpen && <Button className="ghost mobile-menu" onClick={() => setSidebarOpen(false)} aria-label={t("common.closeNavigation")}><X /></Button>}
         </div>
+        <Link className="nav-link" href="/demo" onClick={() => setSidebarOpen(false)}><ScanLine />{locale === "zh-CN" ? "领导层演示场景" : "Leadership Demo Scenarios"}</Link>
         {nav.map((group) => (
           <div key={group.label}>
             <div className="nav-label">{t(group.label)}</div>
