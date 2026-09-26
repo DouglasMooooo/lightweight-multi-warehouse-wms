@@ -189,6 +189,13 @@ export function LeadershipDemo() {
   const traceSerial = stock.serials.find((s) => s.serialNumber === trace);
   const events = traceDemo(stock, trace);
   const movements = demoReport(stock, period);
+  const warehouseContext =
+    page === "Inventory" || page === "Reporting"
+      ? "All warehouses"
+      : (page === "Warehouse Map" && mapWarehouse === "MEL") ||
+          (page === "Transfer" && transfer.status !== "Draft")
+        ? "Melbourne"
+        : "Sydney";
 
   function run(command: DemoCommand, success: string) {
     try {
@@ -245,8 +252,12 @@ export function LeadershipDemo() {
           </span>
         </Link>
         <div className="demo-site">
-          <span className="demo-live-dot" /> Sydney{" "}
-          <small>Service warehouse</small>
+          <span className="demo-live-dot" /> {warehouseContext}
+          <small>
+            {warehouseContext === "All warehouses"
+              ? "Consolidated view"
+              : "Current task context"}
+          </small>
         </div>
         <nav aria-label="Demo workflows">
           {pages.map(([name, Icon]) => (
@@ -272,7 +283,7 @@ export function LeadershipDemo() {
           <div>
             <span>WMS Workflow Preview</span>
             <b>
-              Sydney <span>/</span> Leadership demo
+              {warehouseContext} <span>/</span> Leadership demo
             </b>
           </div>
           <button className="demo-reset" onClick={reset}>
