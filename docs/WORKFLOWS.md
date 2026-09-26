@@ -1,38 +1,52 @@
 # Workflows
 
-## Prepare and dispatch
+## Replacement outbound
 
-1. Load ERP/SH order and its Replacement Unit Information.
-2. Show eligible inventory by physical location and condition.
-3. Allocate no more than Available Qty.
-4. Prepare: Physical unchanged; Frozen increases.
-5. Generate a concurrency-safe warehouse pickup code.
-6. Print the batch label without changing inventory.
-7. Scan N unique matching SNs for an SN-tracked Qty N.
-8. Confirm dispatch: Physical and Frozen both decrease.
-9. Mark SNs Outbound, audit the operation and queue ERP write-back.
+1. Import ERP Replacement Unit Information as `Pending_Allocation`; record `importedAt`.
+2. Allocate one or more eligible physical locations; record `allocatedAt` only when fully allocated. Physical and Frozen do not change.
+3. Scan/assign required serials against the exact allocations.
+4. Confirm preparation. Exact balances increase Frozen; Physical is unchanged.
+5. When all lines are prepared, attach one PickupBatch and set Ready for Pickup.
+6. Confirm dispatch. Exact allocations reduce Physical and Frozen, SNs become Outbound and `outboundAt` is set.
+7. Queue ERP write-back independently. Failure creates retryable work and does not reverse dispatch.
 
-## Faulty return
+## Faulty return and repair
 
-1. Scan SN.
-2. Query `ERPAdapter.findBySerialNumber`.
-3. Display related SH, SKU, model and ERP status.
-4. Confirm SYD receipt to `REPAIR-01`.
-5. Create Return_to_Repair, increase Repair physical inventory and set SN status Repair.
-6. If lookup fails, create Manual Review; do not guess data.
+1. Query ERP by known returned SN and receive once to Repair stock.
+2. Create a RepairReturn and RepairJob; preserve the existing serial entity when present.
+3. Start repair: `Pending_Repair -> In_Repair`, recording `repairStartedAt`.
+4. Only `In_Repair` can complete. Direct completion from Received/Pending_Repair is rejected.
+5. Repair_Good decrements Repair, increments Repair_Good, restores the same SN to `In_Stock`, and appends transaction/audit evidence.
+6. Scrap decrements Repair and increments non-allocatable Scrap; Returned_Unrepaired stays non-allocatable in Repair at a service/holding location.
+7. Legacy / Manual Recognition requires a reason and is only for historical Repair_Good whose earlier lifecycle is unavailable.
 
-## Move
+## Pickup and label
 
-Validate same warehouse, distinct locations and sufficient Available Qty. In one transaction, decrement source and increment destination. Create one Move business record and one audit entry.
+Preparation freezes already allocated stock and attaches orders sharing a Pickup Code to one PickupBatch. A batch is Ready when its orders are ready; it becomes Picked_Up only after all active orders in the batch are dispatched. The one-page A4 label groups identical SKU + Model + ERP Warehouse rows across all SH documents. Label and pickup-code generation never mutate inventory.
 
-## Adjustment
+## Move and adjustment
 
-Validate supervisor permission, item rules, quantity, reason and remark. Create Adjustment_In or Adjustment_Out and update the single relevant balance. Adjustment never impersonates Move.
+Move validates source and destination in the same warehouse and updates both balances, selected SNs, one Move transaction and audit atomically. Adjustment uses one signed physical delta and cannot consume Frozen stock. Cross-warehouse movement is Transfer.
 
 ## Transfer
 
-Transfer Out decreases source Physical, increases In Transit and sets SN In_Transit. Transfer In decreases In Transit, increases destination Physical, and sets the SN’s warehouse/location and state to In_Stock.
+Transfer Out removes source Physical, adds In Transit, updates SNs and writes Transfer_Out. Transfer In releases In Transit, adds destination Physical, relocates SNs and writes Transfer_In.
 
-## Stocktake
+## Reporting and reconciliation
 
-Capture an expected snapshot including Physical, Frozen and Available. Operators count quantity/SNs. Variance requires supervisor review; approval creates explicit adjustment transactions.
+Reports use domain timestamps: movement flows use `effectiveAt`, outbound uses `outboundAt`, and preparation uses `preparedAt`. Machine scope comes from Product `reportMachine`, not item type. Reconciliation maps semantic fields, compares balances/SNs and never writes inventory.
+
+## Shadow workbook import
+
+1. Select the latest `.xlsx` and an explicit Sydney business cutover time.
+2. Run `DRY_RUN`; semantic headers are resolved regardless of column order.
+3. Review rejected rows, active SH/Pickup/repair projections and inventory/SN differences.
+4. Correct source master data or use a new controlled WMS transaction; there is no auto-fix.
+5. Only an approved non-production empty shadow database may use `SHADOW_SEED`.
+6. Repeat DRY_RUN during the pilot. ERP write-back and workbook write-back stay disabled.
+
+## Scanner interaction
+
+Normal barcode input behaves as keyboard text terminated by Enter. Outbound SN, faulty return and SN trace flows validate immediately, block rapid duplicate submissions, show a specific result, preserve failed input and return focus to the scanner field. Routine success uses inline/toast feedback rather than a modal.
+
+High-risk confirmations show the affected SH/SN/transfer, location and quantity. They explain the physical/frozen/in-transit effect instead of asking a generic “Are you sure?” question.

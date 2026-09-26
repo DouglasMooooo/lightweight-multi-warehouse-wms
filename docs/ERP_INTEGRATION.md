@@ -1,21 +1,9 @@
-# ERP integration
+# ERP Integration
 
-`ERPAdapter` prevents domain code from depending on a vendor.
+`ERPAdapter` defines server-side replacement-order lookup, faulty-SN lookup, transfer retrieval and write-back. The Preview uses `MockERPAdapter`; browser components never instantiate an adapter or contain vendor-specific rules.
 
-Current conceptual operations:
+Replacement outbound import reads ERP Replacement Unit Information only. An ERP Pickup Code is preserved when present; otherwise WMS issues one atomically at preparation. ERP warehouse classification is stored separately from physical warehouse and location.
 
-- `findBySerialNumber`
-- `getOutboundOrder`
-- `getTransferOrder`
-- `writeBackOutbound`
-- `writeBackTransfer`
-- `healthCheck`
+Faulty lookup failure creates an operational exception and never invents SKU, model or SH data. Outbound and transfer confirmation create durable sync jobs. External failure is handled through retry/manual review and never rewrites confirmed physical history.
 
-`MockERPAdapter` contains fixtures outside inventory services. Faulty SN `60E5M4805C3F242` returns SH `SH-2607-00165610`, SKU `97-223-00107-00`, model EQ4800-S and a return-expected status.
-
-Replacement outbound uses the ERP replacement structure, not faulty-unit details. ERP warehouse labels are mapped in master data:
-
-- `悉尼物料仓` → New
-- `悉尼良品仓` → Repair_Good
-
-Production write-back is an outbox-style process through `ERPSyncJob`. Statuses are Pending, Synced, Failed, Retrying and Manual_Review. Retry is idempotent by entity and operation reference.
+Production Kingdee connectivity, credentials, retry workers, rate limiting and webhook reconciliation remain future integration work. The boundary and durable sync jobs are already present so integration does not change inventory semantics.

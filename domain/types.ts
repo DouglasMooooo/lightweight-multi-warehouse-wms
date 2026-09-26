@@ -12,14 +12,20 @@ export type TransactionType =
   | "Adjustment_Out"
   | "Return_to_Repair"
   | "Transfer_Out"
-  | "Transfer_In";
+  | "Transfer_In"
+  | "Repair_Completed"
+  | "RepairGood_Adjustment_In";
 export type OrderStatus =
   | "Draft"
   | "Ready"
+  | "Imported"
+  | "Pending_Allocation"
+  | "Allocated"
   | "Prepared"
   | "Partially_Prepared"
   | "Ready_for_Pickup"
   | "Outbound"
+  | "ERP_Synced"
   | "Cancelled"
   | "Exception";
 
@@ -28,6 +34,8 @@ export interface Warehouse {
   code: WarehouseCode;
   name: string;
   timezone: string;
+  floorAreaSqm?: number;
+  operationalAreaSqm?: number;
   active: boolean;
 }
 
@@ -47,6 +55,8 @@ export interface Product {
   itemType: ItemType;
   category: string;
   serialTrackingRequired: boolean;
+  reportMachine?: boolean;
+  reportGroup?: string;
   active: boolean;
 }
 
@@ -76,18 +86,31 @@ export interface SerialNumber {
   status: SerialStatus;
   relatedShNo?: string;
   relatedTransferNo?: string;
+  relatedWorkOrderNo?: string;
 }
 
 export interface OutboundLine {
   id: string;
+  workOrderNo?: string;
   sku: string;
   model: string;
   requiredQty: number;
   requiredCondition: StockCondition;
+  erpWarehouse?: string;
   allocatedQty: number;
   preparedQty: number;
   dispatchedQty: number;
   allocationLocation?: string;
+  allocations: Array<{
+    id: string;
+    locationCode: string;
+    containerCode?: string;
+    quantity: number;
+    serialNumber?: string;
+    allocatedAt?: string;
+    preparedAt?: string;
+    dispatchedAt?: string;
+  }>;
   scannedSerials: string[];
 }
 
@@ -99,6 +122,11 @@ export interface OutboundOrder {
   warehouseCode: WarehouseCode;
   status: OrderStatus;
   createdAt: string;
+  importedAt?: string;
+  allocatedAt?: string;
+  preparedAt?: string;
+  readyForPickupAt?: string;
+  outboundAt?: string;
   customerLabel?: string;
   lines: OutboundLine[];
   erpSyncStatus: "Pending" | "Synced" | "Failed" | "Retrying" | "Manual_Review";
@@ -112,15 +140,23 @@ export interface TransferOrder {
   status: "Draft" | "Prepared" | "In_Transit" | "Partially_Received" | "Received" | "Exception";
   sku: string;
   model: string;
+  condition: StockCondition;
   qty: number;
   serials: string[];
-  sourceLocation: string;
+  sourceLocation?: string;
   destinationLocation?: string;
+  createdAt?: string;
+  preparedAt?: string;
+  dispatchedAt?: string;
+  receivedAt?: string;
 }
 
 export interface StockTransaction {
   id: string;
+  actor?: string;
   at: string;
+  recordedAt?: string;
+  effectiveAt?: string;
   type: TransactionType;
   warehouseCode: WarehouseCode;
   sku?: string;
@@ -128,10 +164,74 @@ export interface StockTransaction {
   serialNumber?: string;
   qty: number;
   condition: StockCondition;
+  sourceCondition?: StockCondition;
+  targetCondition?: StockCondition;
+  repairOutcome?: "Repair_Good" | "Scrap" | "Returned_Unrepaired";
   fromLocation?: string;
   toLocation?: string;
   businessReference?: string;
   remark: string;
+}
+
+export interface RepairJob {
+  id: string;
+  serialNumber?: string;
+  sku: string;
+  model: string;
+  warehouseCode: WarehouseCode;
+  currentLocation: string;
+  originalShNo?: string;
+  status:
+    | "Received"
+    | "Pending_Repair"
+    | "In_Repair"
+    | "Repair_Completed"
+    | "Repair_Good"
+    | "Scrap_Pending"
+    | "Scrapped";
+  outcome?: "Repair_Good" | "Scrap" | "Returned_Unrepaired";
+  source: "Native_Return" | "Legacy_Manual";
+  receivedAt: string;
+  repairStartedAt?: string;
+  repairCompletedAt?: string;
+  returnedToStockAt?: string;
+  remark: string;
+}
+
+export interface PickupLabelLine {
+  sku: string;
+  model: string;
+  erpWarehouse: string;
+  qty: number;
+}
+
+export interface PickupBatch {
+  id: string;
+  code: string;
+  labelType: "Batch_Label" | "Unit_SN_Label";
+  status?: "Draft" | "Ready" | "Picked_Up" | "Cancelled";
+  shNos: string[];
+  lines: PickupLabelLine[];
+  readyAt?: string;
+  pickedUpAt?: string;
+  carrier?: string;
+  customer?: string;
+  collector?: string;
+  remark?: string;
+}
+
+export interface DashboardTasks {
+  needsAllocation: number;
+  allocated: number;
+  prepared: number;
+  readyForPickup: number;
+  outboundToday: number;
+  faultyReturns: number;
+  repairQueue: number;
+  repairCompletedAwaitingPutaway: number;
+  transfersInTransit: number;
+  reconciliationIssues: number;
+  erpSyncFailures: number;
 }
 
 export interface AuditEntry {
@@ -156,6 +256,11 @@ export interface WmsException {
 }
 
 export interface WmsState {
+  currentUser?: {
+    displayName: string;
+    role: string;
+    permissions: string[];
+  };
   warehouses: Warehouse[];
   locations: Location[];
   products: Product[];
@@ -163,9 +268,29 @@ export interface WmsState {
   serials: SerialNumber[];
   outboundOrders: OutboundOrder[];
   transfers: TransferOrder[];
+  repairJobs?: RepairJob[];
+  pickupBatches?: PickupBatch[];
+  dashboardTasks?: DashboardTasks;
   transactions: StockTransaction[];
   audit: AuditEntry[];
   exceptions: WmsException[];
   pickupSequence: Record<WarehouseCode, number>;
   faultyReceivedCount: number;
 }
+
+export type WmsCommand =
+  | { type: "importOutbound"; shNo: string }
+  | { type: "allocateOutbound"; orderId: string; lineId: string; locationCode: string; qty: number; containerCode?: string }
+  | { type: "prepareOutbound"; orderId: string; lineId: string; allocationIds?: string[] }
+  | { type: "scanOutboundSerial"; orderId: string; lineId: string; serialNumber: string }
+  | { type: "dispatchOutbound"; orderId: string }
+  | { type: "registerSerial"; serialNumber: string; sku: string; warehouseCode: WarehouseCode; locationCode: string; condition: StockCondition }
+  | { type: "adjustStock"; direction: "In" | "Out"; warehouseCode: WarehouseCode; locationCode: string; sku?: string; itemType: ItemType; condition: StockCondition; qty: number; reason: string; remark: string; serialNumber?: string }
+  | { type: "receiveFaulty"; serialNumber: string }
+  | { type: "startRepair"; repairJobId: string; remark: string }
+  | { type: "completeRepair"; repairJobId: string; targetLocationCode: string; outcome: "Repair_Good" | "Scrap" | "Returned_Unrepaired"; remark: string }
+  | { type: "legacyRepairGoodIn"; warehouseCode: WarehouseCode; locationCode: string; sku: string; qty: number; reason: string; remark: string; serialNumber?: string }
+  | { type: "moveStock"; warehouseCode: WarehouseCode; sku: string; condition: StockCondition; fromLocation: string; toLocation: string; qty: number; remark: string; serialNumbers?: string[] }
+  | { type: "dispatchTransfer"; transferId: string }
+  | { type: "receiveTransfer"; transferId: string; destinationLocation: string }
+  | { type: "resetDemo" };

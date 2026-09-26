@@ -1,29 +1,33 @@
-# Data model
+# Data Model
 
-## Master data
+The stabilised model includes:
 
-- `Warehouse` supports SYD, MEL, BNE and future sites without schema change.
-- `Location` belongs to a warehouse and stores rack/service-zone metadata.
-- `Product` owns SKU, model, Item Type and serial-tracking policy.
-- `Container` is optional and lightweight; the Preview does not model a full pallet lifecycle.
-- `ERPWarehouseMapping` maps an ERP warehouse label to a WMS stock condition.
+- explicit operational dates on outbound, transfer, repair and stock transactions;
+- `PickupBatch` as the one-code/many-SH pickup aggregate;
+- `RepairJob` for native Repair to Repair_Good/Scrap traceability;
+- Product `reportMachine` and `reportGroup` metadata;
+- immutable confirmed `OperationalSnapshot` rows.
 
-## Inventory and traceability
+`OutboundOrderLine.erpWarehouse` is the authoritative ERP classification for mixed orders. ERP warehouse, physical warehouse, physical location and condition are separate relational concepts.
 
-- `InventoryBalance` is the fast current-state table keyed by relational warehouse, location, optional container, optional product and condition fields.
-- `StockTransaction` is the audit ledger with explicit physical, frozen and in-transit deltas.
-- `operationId` groups the business operation. One Move row carries both source and destination.
-- `SerialNumber` is globally unique and stores current warehouse, location, condition and state.
+`InventoryBalance` is grouped by warehouse, physical location, optional container, optional product, item type and condition. Migration `20260727000000_init` enforces one logical row with an expression unique index over:
 
-The migration adds an expression unique index using `COALESCE` for optional product/container fields. This avoids PostgreSQL nullable-unique gaps without concatenated business keys.
+`warehouseId, locationId, COALESCE(containerId, ''), COALESCE(productId, ''), itemType, condition`
 
-## Operational documents
+Database checks prevent negative physical/frozen/in-transit values and Frozen greater than Physical. Available is calculated as `physicalQty - frozenQty`; it is not stored. Quantities use PostgreSQL `Decimal(18,3)`.
 
-- Outbound: `OutboundOrder`, `OutboundOrderLine`, `OutboundAllocation`.
-- Repair: `RepairReturn`.
-- Transfer: `TransferOrder`, `TransferOrderLine`, `TransferSerial`.
-- Stocktake: `Stocktake`, `StocktakeLine`.
-- Integration: `ERPDocument`, `ERPSyncJob`.
-- Control: `PickupSequence`, `AuditLog`, `Exception`, `User`, `Role`.
+`OutboundOrderLine` has many allocations. Each records physical source, quantity, optional container/SN, preparation time and dispatch time. Outbound lifecycle evidence is `importedAt`, `allocatedAt`, `preparedAt`, `readyForPickupAt` and `outboundAt`; fields are nullable for legacy completeness.
 
-Indexes cover SKU, SN, SH, pickup code, order/transfer status, warehouse/location and transaction time.
+`RepairReturn.active` plus a partial unique index prevents duplicate active receipt for one SN. `RepairJob.repairStartedAt` records entry to active repair. `SerialNumber` remains first-class.
+
+`RepairJob.returnedToStockAt` is narrower than completion time: it is populated only when Repair_Good becomes usable `In_Stock`. Scrap and Returned_Unrepaired leave it null.
+
+`StockTransaction.sourceCondition`, `targetCondition` and `repairOutcome` make Repair_Completed reclassification explicit alongside its source/target locations, SN, business reference, actor, operation ID and effective time.
+
+`InventoryBalance.legacySerialGap` explicitly marks known pre-cutover aggregate balances whose incomplete SN coverage is informational. It does not relax registration capacity or current transaction rules.
+
+`PickupBatch.status` is `Draft`, `Ready`, `Picked_Up` or `Cancelled`. `readyAt` and `pickedUpAt` are distinct; carrier, customer, collector and remark are optional evidence. Pickup Code is unique.
+
+`PickupSequence` is incremented atomically and the issued value comes from the returned row. It never uses `MAX(code) + 1`.
+
+`ShadowImportBatch` records source filename/checksum, mode, cutover, status, row counts, issues and actor. The unique checksum + mode + cutover constraint prevents duplicate seeds. Every seeded balance has a linked `Opening` StockTransaction through `shadowImportBatchId`; the batch is opening evidence, not reconstructed historical truth.

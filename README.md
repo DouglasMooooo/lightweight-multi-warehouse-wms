@@ -1,65 +1,185 @@
-# Lightweight Multi-Warehouse WMS Preview
+# Lightweight Multi-Warehouse WMS Prototype
 
-A task-oriented warehouse execution Preview for Sydney operations, shaped for future PostgreSQL-backed multi-warehouse deployment and ERP integration.
+## Leadership workflow demo
 
-The Preview includes working browser-based demo workflows for current stock, Prepared/Frozen outbound, pickup labels, SN scanning and dispatch, faulty returns, atomic Move, controlled Adjustment, SN traceability, SYD → MEL transfer, stocktake counts, audit and exceptions. Demo changes persist in the browser and can be reset from the header.
+Open `/demo` for the resettable, synthetic leadership preview. It runs without a database or ERP connection and includes scan-driven preparation, digital pickup, faulty return, transfer, repair, location visualization, SN trace and audit scenarios. See [the presenter guide and capability boundaries](docs/LEADERSHIP_DEMO_V2.md). Existing operational routes are preserved.
 
-## Quick start — no database required
+## Project
 
-Requirements: Node.js 20.9+ and pnpm.
+This repository is a working internal WMS prototype for multi-warehouse physical execution. It is based on observed Sydney warehouse workflows and a validated spreadsheet reference.
+
+The release demonstrates:
+
+```text
+Business Analysis
++
+Target-State System Design
++
+Working Application
+```
+
+It is an internal Preview / proof of concept, not a production-ready enterprise WMS.
+
+## Purpose
+
+The prototype explores a target state that connects:
+
+```text
+ERP demand
+-> WMS warehouse execution
+-> inventory / SN / location traceability
+-> retryable ERP write-back
+```
+
+The Sydney workbook remains read-only operational evidence. PostgreSQL-backed balances and relational entities are application authority; spreadsheet formulas, helper columns and display placeholders are not reproduced as database architecture.
+
+## Core Features
+
+- operational Dashboard with To Prepare, Awaiting Pickup, repair, transfer and exception queues;
+- ERP order Fetch → Preview → Validate → Confirm Import;
+- outbound allocation and Prepared/Frozen inventory;
+- combined scanner, paste, CSV and XLSX Outbound Review;
+- final-confirmation mutation boundary;
+- batch inbound, faulty receipt, Repair Good recognition and SN binding;
+- same-warehouse Move and separate cross-warehouse Transfer;
+- native faulty return and repair lifecycle;
+- Product Inventory Report with Physical, Available, Frozen, In Transit and condition breakdown;
+- SVG warehouse floor plan, rack elevation and location detail;
+- SN search, reconciliation, labels, audit and exceptions;
+- English and Simplified Chinese operator presentation.
+
+## Architecture
+
+The application is a modular monolith:
+
+```mermaid
+flowchart TD
+  Operator["Warehouse Operator"] --> UI["Next.js UI"]
+  UI --> API["Bounded APIs"]
+  API --> Services["Application / Domain Services"]
+  Services --> Prisma["Prisma"]
+  Prisma --> DB["Neon PostgreSQL"]
+  Services <--> Adapter["ERPAdapter"]
+  Adapter <--> Providers["Mock / Kingdee"]
+```
+
+ERP integration stays behind `ERPAdapter`. Important physical operations are transactional and audited. Current balance comes from controlled `InventoryBalance` updates and is reconciled to `StockTransaction`, which application workflows treat as append-only ledger evidence. Corrections create new compensating transactions rather than silently editing history.
+
+## Tech Stack
+
+- Next.js, React and TypeScript
+- Next.js server APIs and server-side application/domain services
+- PostgreSQL on Neon
+- Prisma ORM
+- Vercel, functions configured for Sydney `syd1`
+- React + SVG warehouse visualisation
+- Vitest, TypeScript and ESLint validation
+
+## Local Environment Setup
+
+Requirements:
+
+- Node.js 24+
+- pnpm 11+
+- PostgreSQL 15+
 
 ```powershell
+Copy-Item .env.example .env
 pnpm install
+pnpm db:generate
+pnpm db:migrate
+```
+
+Use `pnpm db:seed` only against an intended disposable local/development database.
+
+```powershell
 pnpm dev
 ```
 
 Open `http://localhost:3000/dashboard`.
 
-There is no password in Preview demo mode. The active identity is `Demo Supervisor` with role `Warehouse_Supervisor`.
+## Database
 
-Useful demo values:
+The current Vercel Preview reuses the existing Neon Sydney **Internal Preview / Prototype Database**. It contains the useful Sydney prototype dataset.
 
-- Faulty ERP lookup SN: `60E5M4805C3F242`
-- Prepared outbound: `SH-2607-00175008`
-- Outbound scan SNs: `EQ48S260700001`, `EQ48S260700002`
-- Basic transfer: `TR-SYD-MEL-00018`
+No new database is created for this release. Normal Vercel deployment runs migrations only and never automatically seeds or resets inventory:
 
-## PostgreSQL setup
-
-Create an empty PostgreSQL database locally, in Neon, or in Supabase. Then:
-
-```powershell
-Copy-Item .env.example .env
-# Edit DATABASE_URL in .env
-pnpm install
-pnpm db:generate
-pnpm db:migrate
-pnpm db:seed
-pnpm dev
+```text
+prisma generate
+prisma migrate deploy
+next build
 ```
 
-The browser Preview currently uses the in-memory demo repository even when a database is configured. The Prisma schema, migration, seed, repository boundary and transactional domain services are ready for the next sprint’s server-action wiring.
+`pnpm db:bootstrap-preview` is an explicit manual tool for a completely empty approved non-production database. It is not part of deployment.
 
-## Validation
+Environment identity is mandatory:
+
+```text
+APP_ENV=preview
+DATABASE_ENV=preview
+NEXT_PUBLIC_APP_ENV=preview
+```
+
+Preview/staging cannot connect to a database classified as production.
+
+## ERP
+
+`ERPAdapter` defines replacement-order lookup, faulty-SN lookup, transfer retrieval and write-back.
+
+- `MockERPAdapter`: controlled internal demonstration only.
+- `KingdeeERPAdapter`: normalized gateway boundary requiring approved contract and credentials.
+- `UnconfiguredERPAdapter`: explicit safe state when integration is unavailable.
+
+The UI exposes adapter status. This release does not claim verified production Kingdee connectivity. Confirmed physical operations survive later ERP write-back failure through retryable `ERPSyncJob` evidence.
+
+## Deployment
+
+Vercel Preview uses the existing `syd-wms-preview` project and functions configured for `syd1`.
 
 ```powershell
 pnpm db:validate
+pnpm db:generate
 pnpm test
 pnpm typecheck
 pnpm lint
 pnpm build
 ```
 
-## Deployment
+The populated Preview must keep demo reset and shadow replacement disabled. Secret `.env*` values are never committed.
 
-The application is compatible with Vercel’s Next.js runtime. Configure `DATABASE_URL`, `ERP_ADAPTER`, and `NEXT_PUBLIC_DEMO_MODE` in the Vercel project. Use a pooled PostgreSQL connection string suitable for serverless execution and a direct connection for migrations if the provider recommends one. Do not commit `.env`.
+## Documents
 
-## Architecture
+- [System Design Overview](docs/SYSTEM_DESIGN_OVERVIEW.md)
+- [BA Case Study](docs/BA_CASE_STUDY.md)
+- [Database and Environments](docs/DATABASE_AND_ENVIRONMENTS.md)
+- [Internal Demo Guide](docs/INTERNAL_DEMO_GUIDE.md)
+- [Business Rules](docs/BUSINESS_RULES.md)
+- [Assumptions and Workbook Conflicts](docs/ASSUMPTIONS.md)
+- [Data Model](docs/DATA_MODEL.md)
+- [Workflows](docs/WORKFLOWS.md)
+- [ERP Integration](docs/ERP_INTEGRATION.md)
+- [Pickup and Label Rules](docs/PICKUP_LABEL_RULES.md)
+- [Deployment Environments](docs/DEPLOYMENT_ENVIRONMENTS.md)
 
-The repository separates:
+## Limitations
 
-`UI → application services → domain operations → repository → integration adapters`
+- Internal prototype data and infrastructure; not official production inventory.
+- Real Kingdee connectivity and write-back are not verified.
+- Authentication and RBAC are prototype-level.
+- Warehouse geometry is not surveyed-to-scale.
+- No approved capacity master, so utilisation is not displayed.
+- Production monitoring, backup/DR, security review and formal UAT are future work.
+- Legacy SN traceability gaps remain explicitly classified.
 
-See the documents in `docs/` for rules, workflows, schema decisions, ERP behaviour, assumptions and backlog.
+## Future Roadmap
 
-The validated spreadsheet is preserved read-only at `reference/SYD_WMS_current_reference.xlsx`. Development code must never write to it.
+- dedicated Development, UAT and Production databases;
+- Microsoft Entra ID or suitable SSO and enforced RBAC;
+- phased real Kingdee integration;
+- structured logs, monitoring and ERP sync operations;
+- backup, point-in-time recovery and restore testing;
+- security and data-classification review;
+- formal warehouse/finance UAT;
+- controlled one-time production migration and cutover.
+
+The modular-monolith architecture should remain until measured scale or organisational evidence justifies a different platform.
