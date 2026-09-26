@@ -42,7 +42,7 @@ const pages = [
   [
     "Digital Pickup",
     ShieldCheck,
-    "Simulated identity or driver handover dispatches stock",
+    "Scan the linked work order as an engineer or shipment QR as a driver",
   ],
   [
     "Faulty Return",
@@ -160,16 +160,19 @@ export function LeadershipDemo() {
   const [pickupKind, setPickupKind] = useState<"Engineer" | "Driver">(
     "Engineer",
   );
-  const [pickupReference, setPickupReference] = useState("");
-  const [collector, setCollector] = useState("");
+  const [engineerIdentity, setEngineerIdentity] = useState("ENG-2048");
   const [returnText, setReturnText] = useState("60E5M4805C3F242");
   const [returnLocation, setReturnLocation] = useState("");
   const [repairSn, setRepairSn] = useState("");
   const [goodLocation, setGoodLocation] = useState("FLEX-01");
   const [destination, setDestination] = useState("");
+  const [transferBatchText, setTransferBatchText] = useState("");
+  const [repairBatchText, setRepairBatchText] = useState("");
+  const [repairBatchSns, setRepairBatchSns] = useState<string[]>([]);
   const [mapWarehouse, setMapWarehouse] = useState("SYD");
   const [location, setLocation] = useState("FLEX-01");
   const [trace, setTrace] = useState("EQ48S260700001");
+  const [traceQuery, setTraceQuery] = useState("EQ48S260700001");
   const [samples, setSamples] = useState(false);
   const [question, setQuestion] = useState("");
   const [period, setPeriod] = useState(7);
@@ -190,6 +193,23 @@ export function LeadershipDemo() {
     }));
   const traceSerial = stock.serials.find((s) => s.serialNumber === trace);
   const events = traceDemo(stock, trace);
+  const traceOrder = stock.outboundOrders.find((item) =>
+    item.shNo === trace || item.pickupCode === trace || item.lines.some((itemLine) =>
+      itemLine.workOrderNo?.toUpperCase() === trace || itemLine.scannedSerials.includes(trace),
+    ),
+  );
+  const traceTransfer = stock.transfers.find((item) =>
+    item.transferNo === trace || item.serials.includes(trace),
+  );
+  const traceWorkOrder = traceOrder?.lines.find((itemLine) =>
+    itemLine.scannedSerials.includes(trace) || itemLine.workOrderNo?.toUpperCase() === trace,
+  )?.workOrderNo ?? traceSerial?.relatedWorkOrderNo;
+  const traceBusinessRefs = [
+    traceOrder?.shNo ?? traceSerial?.relatedShNo,
+    traceWorkOrder,
+    traceOrder?.pickupCode,
+    traceTransfer?.transferNo ?? traceSerial?.relatedTransferNo,
+  ].filter((value): value is string => Boolean(value));
   const movements = demoReport(stock, period);
   const warehouseContext =
     page === "Inventory" || page === "Reporting"
@@ -220,16 +240,19 @@ export function LeadershipDemo() {
     setSession(service.reset());
     setGeneration((n) => n + 1);
     setPickupKind("Engineer");
-    setPickupReference("");
-    setCollector("");
+    setEngineerIdentity("ENG-2048");
     setReturnText("60E5M4805C3F242");
     setReturnLocation("");
     setRepairSn("");
     setGoodLocation("FLEX-01");
     setDestination("");
+    setTransferBatchText("");
+    setRepairBatchText("");
+    setRepairBatchSns([]);
     setMapWarehouse("SYD");
     setLocation("FLEX-01");
     setTrace("EQ48S260700001");
+    setTraceQuery("EQ48S260700001");
     setSamples(false);
     setQuestion("");
     setPeriod(7);
@@ -636,18 +659,36 @@ export function LeadershipDemo() {
                     pickupKind === "Engineer" ? (
                       <dl className="demo-facts">
                         <div>
-                          <dt>{zh("Engineer")}</dt>
-                          <dd>
-                            {zh("Alex Chen")}
-                            <small>
-                              {zh("Simulated after-sales identity")}
-                            </small>
-                          </dd>
-                        </div>
-                        <div>
                           <dt>{zh("After-sales order / shipment")}</dt>
                           <dd>{zh(order.shNo)}</dd>
                         </div>
+                        <label className="demo-field">
+                          {zh("Engineer identity")}
+                          <input
+                            value={engineerIdentity}
+                            onChange={(e) => setEngineerIdentity(e.target.value)}
+                            placeholder={zh("ENG-2048")}
+                          />
+                        </label>
+                        <Scan
+                          key={`engineer-${generation}`}
+                          label={zh("Scan work order QR code")}
+                          hint={order.lines[0].workOrderNo ?? order.shNo}
+                          disabled={order.status !== "Ready_for_Pickup"}
+                          onScan={(value) => {
+                            const scanned = value.trim().toUpperCase();
+                            const valid = scanned === order.lines[0].workOrderNo?.toUpperCase();
+                            if (!valid) {
+                              setNotice({ text: "Scan the QR code for the engineer's linked work order.", error: true });
+                              return false;
+                            }
+                            return run({ type: "collect", kind: "Engineer", reference: scanned, collector: "Alex Chen", identity: engineerIdentity }, "Engineer identity and work order QR verified. Digital signature recorded; task collected and audited.");
+                          }}
+                        />
+                        <p className="demo-signature-note">
+                          <ShieldCheck size={17} />
+                          {zh("Identity + work order QR = simulated digital signature")}
+                        </p>
                         <div>
                           <dt>{zh("Authorised")}</dt>
                           <dd>{zh("Yes · demo grant for this shipment")}</dd>
@@ -655,56 +696,23 @@ export function LeadershipDemo() {
                       </dl>
                     ) : (
                       <>
-                        <label className="demo-field">
-                          {zh("Enter / scan Pickup Order Number")}
-                          <input
-                            value={pickupReference}
-                            onChange={(e) => setPickupReference(e.target.value)}
-                            placeholder={zh("SYD-00265")}
-                          />
-                        </label>
-                        <label className="demo-field">
-                          {zh("Driver / carrier handover name")}
-                          <input
-                            value={collector}
-                            onChange={(e) => setCollector(e.target.value)}
-                            placeholder={zh("Enter collector name")}
-                          />
-                        </label>
+                        <Scan key={`driver-${generation}`} label={zh("Scan pickup order QR code to complete pickup")} hint={order.shNo} disabled={order.status !== "Ready_for_Pickup"} onScan={(value) => {
+                          const scanned = value.trim().toUpperCase();
+                          const valid = [order.shNo, order.pickupCode].some((reference) => reference?.toUpperCase() === scanned);
+                          if (!valid) {
+                            setNotice({ text: "Pickup order QR does not match this shipment.", error: true });
+                            return false;
+                          }
+                          return run({ type: "collect", kind: "Driver", reference: scanned, collector: "QR scanner" }, "Pickup order QR verified. Driver handover recorded; stock dispatched and audited.");
+                        }} />
                         <p>
                           {zh(
-                            "No company identity required. Shipment reference and readiness are validated.",
+                            "Scan the shipment order QR. No engineer identity is required for a driver handover.",
                           )}
                         </p>
                       </>
                     ),
                   )}
-                  <button
-                    className="demo-primary"
-                    disabled={order.status !== "Ready_for_Pickup"}
-                    onClick={() =>
-                      run(
-                        {
-                          type: "collect",
-                          kind: pickupKind,
-                          reference:
-                            pickupKind === "Engineer"
-                              ? order.shNo
-                              : pickupReference,
-                          collector:
-                            pickupKind === "Engineer" ? "Alex Chen" : collector,
-                        },
-                        "Pickup Verified. Shipment Collected; SNs Outbound; inventory reduced; audit event created.",
-                      )
-                    }
-                  >
-                    {zh(
-                      pickupKind === "Engineer"
-                        ? "Confirm Collection"
-                        : "Confirm Handover",
-                    )}
-                    <Check size={18} />
-                  </button>
                   {zh(
                     order.status === "Ready" && (
                       <p>
@@ -918,7 +926,7 @@ export function LeadershipDemo() {
                 <Panel>
                   <div className="demo-card-head">
                     <h2>{zh(transfer.transferNo)}</h2>
-                    <span>{zh("EQ4800-S · 1 unit · New")}</span>
+                    <span>{zh(transfer.model)} · {zh(transfer.qty)} {zh("units")} · {zh(readable(transfer.condition))}</span>
                   </div>
                   <div className="demo-three-col">
                     {zh(
@@ -963,28 +971,25 @@ export function LeadershipDemo() {
                         </div>
                       ) : (
                         <>
-                          <Scan
-                            key={transfer.status}
-                            label={zh(
-                              transfer.status === "Draft"
-                                ? "Scan source SN"
-                                : "Scan actual destination SN",
-                            )}
-                            hint={zh("EQ48S260700003")}
-                            onScan={(value) =>
-                              run(
-                                {
-                                  type: "transferScan",
-                                  phase:
-                                    transfer.status === "Draft"
-                                      ? "send"
-                                      : "receive",
-                                  value,
-                                },
-                                "SN matched to expected transfer. Scan evidence recorded for this warehouse.",
-                              )
-                            }
-                          />
+                          <label className="demo-field">
+                            {zh(transfer.status === "Draft" ? "Scan or paste source SNs (one per line)" : "Scan or paste destination SNs (one per line)")}
+                            <textarea
+                              rows={4}
+                              value={transferBatchText}
+                              onChange={(e) => setTransferBatchText(e.target.value)}
+                              placeholder={transfer.serials.join("\n")}
+                              autoComplete="off"
+                              spellCheck={false}
+                            />
+                          </label>
+                          <button
+                            className="demo-secondary"
+                            disabled={!transferBatchText.trim()}
+                            onClick={() => {
+                              const values = transferBatchText.split(/[\s,;]+/).filter(Boolean);
+                              if (run({ type: "transferScanBatch", phase: transfer.status === "Draft" ? "send" : "receive", values }, `${values.length} SN records validated and submitted together.`)) setTransferBatchText("");
+                            }}
+                          >{zh("Validate and submit SN batch")}</button>
                           {zh(
                             transfer.status === "Draft" ? (
                               <button
@@ -992,7 +997,7 @@ export function LeadershipDemo() {
                                 onClick={() =>
                                   run(
                                     { type: "transferOut" },
-                                    "Transfer Out recorded. Unit is In Transit; Melbourne has a receiving task.",
+                                    "Transfer Out recorded. All scanned units are In Transit; Melbourne has a receiving task.",
                                   )
                                 }
                               >
@@ -1063,25 +1068,36 @@ export function LeadershipDemo() {
             page === "Repair → Good" && (
               <div className="demo-two-col">
                 <Panel title={zh("Repair completion")}>
-                  <Scan
-                    label={zh("Scan repair SN once")}
-                    hint={zh("60E5M4805C3F242")}
-                    onScan={(value) => {
-                      const sn = value.trim().toUpperCase();
-                      if (
-                        !stock.repairJobs?.some((j) => j.serialNumber === sn)
-                      ) {
-                        setNotice({
-                          text: "Receive this SN through Faulty Return first.",
-                          error: true,
-                        });
-                        return false;
-                      }
-                      setRepairSn(sn);
-                      setNotice(null);
-                      return true;
-                    }}
-                  />
+                  <label className="demo-field">
+                    {zh("Scan or paste repair SNs (one per line)")}
+                    <textarea
+                      rows={4}
+                      value={repairBatchText}
+                      onChange={(e) => setRepairBatchText(e.target.value)}
+                      placeholder={zh("60E5M4805C3F242")}
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                  </label>
+                  <button className="demo-secondary" disabled={!repairBatchText.trim()} onClick={() => {
+                    const sns = repairBatchText.split(/[\s,;]+/).filter(Boolean).map((sn) => sn.toUpperCase());
+                    const jobs = sns.map((sn) => stock.repairJobs?.find((job) => job.serialNumber === sn && job.status === "In_Repair"));
+                    if (new Set(sns).size !== sns.length || jobs.some((job) => !job)) {
+                      setNotice({ text: "Duplicate or unknown repair SN. Receive each unit into Repair first.", error: true });
+                      return;
+                    }
+                    setRepairSn(sns[0]);
+                    setRepairBatchSns(sns);
+                    setNotice({ text: `${sns.length} repair SNs validated together and ready for one batch completion.`, error: false });
+                    setRepairBatchText("");
+                  }}>{zh("Validate repair SN batch")}</button>
+                  {repairBatchSns.length > 0 && <button className="demo-primary" onClick={() => { if (run({ type: "completeRepairBatch", sns: repairBatchSns, location: goodLocation }, `${repairBatchSns.length} repair units completed in one batch. Same SN identities and physical quantities preserved; audit recorded.`)) setRepairBatchSns([]); }}>{zh("Complete validated repair batch")} · {zh(repairBatchSns.length)} SN</button>}
+                  {zh(stock.repairJobs?.length ? stock.repairJobs.map((job) => (
+                    <button key={job.id} className={`demo-batch-item ${repairSn === job.serialNumber ? "selected" : ""}`} onClick={() => setRepairSn(job.serialNumber ?? "")}>
+                      <span><strong>{zh(job.serialNumber)}</strong><small>{zh(job.model)} · {zh(job.currentLocation)}</small></span>
+                      <Tag>{zh(readable(job.status))}</Tag>
+                    </button>
+                  )) : null)}
                   {zh(
                     repairJob && (
                       <>
@@ -1225,9 +1241,11 @@ export function LeadershipDemo() {
                 <div className="demo-two-col demo-map-layout">
                   <Panel className="demo-floor">
                     <div className="demo-floor-top">
-                      {zh("WAREHOUSE FLOOR")}
-                      <span>{zh("↑ RECEIVING")}</span>
+                      <div><span className="demo-map-eyebrow">{zh("WAREHOUSE OPERATIONS")}</span><h2>{zh(mapWarehouse === "SYD" ? "Sydney warehouse" : "Melbourne warehouse")}</h2><p>{zh("Tap a rack to inspect its live stock")}</p></div>
+                      <span className="demo-compass">N ↑</span>
                     </div>
+                    <div className="demo-map-scene">
+                    <div className="demo-rack-bank">
                     <div className="demo-racks">
                       {zh(
                         stock.locations
@@ -1253,7 +1271,7 @@ export function LeadershipDemo() {
                                   {zh(detail.qty)}
                                   {zh("units")}
                                 </span>
-                                <small>{zh("Fixed location")}</small>
+                                <small>{zh(detail.balances.slice(0, 2).map((b) => b.model).join(" · ") || "Empty rack")}</small>
                               </button>
                             );
                           }),
@@ -1312,8 +1330,15 @@ export function LeadershipDemo() {
                         ].map((kind) => <Tag key={kind}>{zh(kind)}</Tag>),
                       )}
                     </div>
+                    </div>
+                    <div className="demo-map-selection">
+                      <span>{zh("SELECTED LOCATION")}</span>
+                      <strong>{zh(location)}</strong>
+                      <small>{zh(selectedLocation.qty)} {zh("physical units")}</small>
+                    </div>
+                    </div>
                   </Panel>
-                  <Panel title={zh(location)}>
+                  <Panel title={zh("Location detail")} className="demo-map-detail">
                     <Tag>{zh(selectedLocation.occupancy)}</Tag>
                     <p>
                       {zh(selectedLocation.location?.zone)} · {zh(mapWarehouse)}
@@ -1394,21 +1419,38 @@ export function LeadershipDemo() {
               <>
                 <Panel>
                   <Scan
-                    label={zh("Search by SN")}
-                    hint={zh("EQ48S260700001")}
+                    label={zh("Search by SN, work order, shipment, or transfer number")}
+                    hint={zh("EQ48S260700001 or SH-2607-00175008")}
                     onScan={(value) => {
-                      setTrace(value.trim().toUpperCase());
+                      setTraceQuery(value.trim().toUpperCase());
+                      const query = value.trim().toUpperCase();
+                      const order = stock.outboundOrders.find((item) => item.shNo === query || item.pickupCode === query || item.lines.some((line) => line.workOrderNo?.toUpperCase() === query));
+                      const transferOrder = stock.transfers.find((item) => item.transferNo === query);
+                      setTrace(order || transferOrder ? query : stock.serials.find((item) => item.serialNumber === query)?.serialNumber ?? query);
                       return true;
                     }}
                   />
+                  <label className="demo-field">{zh("Search business reference")}
+                    <input value={traceQuery} onChange={(event) => setTraceQuery(event.target.value)} placeholder={zh("Work order / SH / transfer number")} />
+                  </label>
+                  <button className="demo-primary" onClick={() => {
+                    const query = traceQuery.trim().toUpperCase();
+                    const order = stock.outboundOrders.find((item) => item.shNo === query || item.pickupCode === query || item.lines.some((line) => line.workOrderNo?.toUpperCase() === query));
+                    const transferOrder = stock.transfers.find((item) => item.transferNo === query);
+                    setTrace(order || transferOrder ? query : stock.serials.find((item) => item.serialNumber === query)?.serialNumber ?? query);
+                  }}>{zh("Search full lifecycle")}</button>
                   <div className="demo-quick-links">
                     {zh(
                       [
                         "EQ48S260700001",
                         "60E5M4805C3F242",
                         "EQ48S260700003",
+                        "EQ48S260700004",
+                        "SH-2607-00175008",
+                        "SYD-00265",
+                        "TR-SYD-MEL-00018",
                       ].map((sn) => (
-                        <button key={sn} onClick={() => setTrace(sn)}>
+                        <button key={sn} onClick={() => { setTraceQuery(sn); setTrace(sn); }}>
                           {zh(sn)}
                         </button>
                       )),
@@ -1445,15 +1487,12 @@ export function LeadershipDemo() {
                             <dd>{zh(traceSerial.condition)}</dd>
                           </div>
                           <div>
-                            <dt>{zh("Business reference")}</dt>
-                            <dd>
-                              {zh(
-                                traceSerial.relatedShNo ??
-                                  traceSerial.relatedTransferNo ??
-                                  "Documentation pending",
-                              )}
-                            </dd>
-                          </div>
+                          <dt>{zh("Business reference")}</dt>
+                          <dd>
+                              {zh(traceOrder?.shNo ?? traceSerial.relatedShNo ?? traceTransfer?.transferNo ?? traceSerial.relatedTransferNo ?? "No linked business reference")}
+                          </dd>
+                        </div>
+                        <div><dt>{zh("Engineer work order")}</dt><dd>{zh(traceSerial.relatedWorkOrderNo ?? "WO-SYD-2607-0042 (demo-linked)")}</dd></div>
                         </dl>
                         <p>
                           {zh(
@@ -1463,8 +1502,8 @@ export function LeadershipDemo() {
                       </Panel>
                       <Panel title={zh("Lifecycle timeline")}>
                         <ol className="demo-timeline">
-                          {zh(
-                            events.map((event) => (
+                        {zh(
+                          events.map((event) => (
                               <li key={event.id}>
                                 <div className="demo-timeline-dot" />
                                 <time>
@@ -1523,6 +1562,18 @@ export function LeadershipDemo() {
                             </div>
                           ),
                         )}
+                        {traceBusinessRefs.length > 0 && <><h3>{zh("Related business documents")}</h3><div className="demo-related-refs">{zh(traceBusinessRefs.map((reference) => <code key={reference}>{zh(reference)}</code>))}</div></>}
+                      </Panel>
+                    </div>
+                  ) : traceOrder || traceTransfer ? (
+                    <div className="demo-two-col">
+                      <Panel title={zh(traceOrder ? "Work order and shipment" : "Transfer lifecycle")}>
+                        <Tag tone={traceOrder?.status === "Outbound" || traceTransfer?.status === "Received" ? "green" : "amber"}>{zh(readable(traceOrder?.status ?? traceTransfer?.status ?? ""))}</Tag>
+                        {traceOrder && <><h3>{zh(traceOrder.shNo)}</h3><p>{zh(traceOrder.pickupCode)} · {zh(traceOrder.lines.map((itemLine) => itemLine.workOrderNo).filter(Boolean).join(" · "))}</p>{traceOrder.lines.map((itemLine) => <article className="demo-return-row" key={itemLine.id}><strong>{zh(itemLine.model)} · {zh(itemLine.requiredQty)} {zh("units")}</strong><p>{zh(itemLine.sku)} · {zh(readable(itemLine.requiredCondition))}</p>{itemLine.scannedSerials.map((sn) => <button className="demo-sn-link" key={sn} onClick={() => { setTrace(sn); setTraceQuery(sn); }}>{zh(sn)} ↗</button>)}</article>)}</>}
+                        {traceTransfer && <><h3>{zh(traceTransfer.transferNo)}</h3><p>{zh(traceTransfer.sourceWarehouse)} → {zh(traceTransfer.destinationWarehouse)} · {zh(traceTransfer.model)} · {zh(traceTransfer.qty)} {zh("units")}</p>{traceTransfer.serials.map((sn) => <button className="demo-sn-link" key={sn} onClick={() => { setTrace(sn); setTraceQuery(sn); }}>{zh(sn)} ↗</button>)}</>}
+                      </Panel>
+                      <Panel title={zh("Lifecycle timeline")}>
+                        {events.length ? <ol className="demo-timeline">{events.map((event) => <li key={event.id}><time>{zh(date(event.at))} · {zh("Sydney")}</time><h3>{zh(readable(event.type))}</h3><p>{zh(event.remark)}</p><small>{zh(event.actor)} · {zh(event.result)}</small></li>)}</ol> : <p>{zh("No events recorded for this business reference in this demo session.")}</p>}
                       </Panel>
                     </div>
                   ) : (

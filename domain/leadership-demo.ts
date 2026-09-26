@@ -17,7 +17,12 @@ export interface DemoSession {
   pickScans: string[];
   sentScans: string[];
   receivedScans: string[];
-  collection?: { kind: "Engineer" | "Driver"; collector: string; at: string };
+  collection?: {
+    kind: "Engineer" | "Driver";
+    collector: string;
+    identity?: string;
+    at: string;
+  };
 }
 export type DemoCommand =
   | { type: "location"; value: string }
@@ -27,13 +32,16 @@ export type DemoCommand =
       kind: "Engineer" | "Driver";
       reference: string;
       collector: string;
+      identity?: string;
     }
   | { type: "return"; serials: string[]; location: string }
   | { type: "transferScan"; phase: "send" | "receive"; value: string }
+  | { type: "transferScanBatch"; phase: "send" | "receive"; values: string[] }
   | { type: "transferOut" }
   | { type: "transferIn"; location: string }
   | { type: "startRepair"; sn: string }
-  | { type: "completeRepair"; sn: string; location: string };
+  | { type: "completeRepair"; sn: string; location: string }
+  | { type: "completeRepairBatch"; sns: string[]; location: string };
 
 const timestamp = () => new Date().toISOString();
 const uid = () => crypto.randomUUID();
@@ -52,7 +60,7 @@ export function createDemoSession(): DemoSession {
     (b) => b.id === "bal-1" || b.id === "bal-2" || b.itemType === "Material",
   );
   for (const balance of stock.inventory) {
-    if (balance.id === "bal-1") balance.physicalQty = 3;
+    if (balance.id === "bal-1") balance.physicalQty = 4;
     if (balance.id === "bal-2") balance.physicalQty = 1;
     balance.frozenQty = 0;
     balance.inTransitQty = 0;
@@ -158,6 +166,14 @@ export function executeDemoCommand(
   source: DemoSession,
   command: DemoCommand,
 ): DemoSession {
+  if (command.type === "completeRepairBatch") {
+    requireThat(command.sns.length > 0, "Select at least one repair SN.");
+    const sns = command.sns.map(normalize);
+    requireThat(new Set(sns).size === sns.length, "Duplicate SN in repair batch.");
+    const jobs = source.stock.repairJobs ?? [];
+    requireThat(sns.every((sn) => jobs.some((job) => job.serialNumber === sn && job.status === "In_Repair")), "Every SN in the batch must have an active In Repair job.");
+    return sns.reduce((session, sn) => executeDemoCommand(session, { type: "completeRepair", sn, location: command.location }), source);
+  }
   const next = structuredClone(source);
   let stock = next.stock;
   const order = stock.outboundOrders[0];
@@ -248,16 +264,18 @@ export function executeDemoCommand(
       );
       requireThat(
         normalize(command.reference) === order.pickupCode ||
-          normalize(command.reference) === order.shNo,
+          normalize(command.reference) === order.shNo ||
+          order.lines.some((item) => item.workOrderNo && normalize(command.reference) === normalize(item.workOrderNo)),
         "Pickup number does not match this shipment.",
-      );
-      requireThat(
-        command.collector.trim(),
-        "Collector name is required for handover evidence.",
       );
       if (command.kind === "Engineer")
         requireThat(
-          command.collector === "Alex Chen",
+          order.lines.some((item) => item.workOrderNo && normalize(command.reference) === normalize(item.workOrderNo)),
+          "Scan the work order QR code for engineer identity confirmation.",
+        );
+      if (command.kind === "Engineer")
+        requireThat(
+          normalize(command.identity ?? command.collector) === "ENG-2048",
           "This simulated engineer is not authorised for this shipment.",
         );
       for (const sn of line.scannedSerials) {
@@ -278,15 +296,20 @@ export function executeDemoCommand(
       stock.outboundOrders[0].outboundAt = at;
       next.collection = {
         kind: command.kind,
-        collector: command.collector.trim(),
+        collector: command.kind === "Engineer" ? "Alex Chen" : command.collector.trim() || "QR scanner",
+        identity: command.kind === "Engineer" ? normalize(command.identity ?? command.collector) : undefined,
         at,
       };
+      for (const serialNumber of line.scannedSerials) {
+        const serial = stock.serials.find((item) => item.serialNumber === serialNumber);
+        if (serial) serial.relatedWorkOrderNo = line.workOrderNo;
+      }
       audit(
         stock,
         "Pickup Verified / Collected",
         order.shNo,
-        `${command.kind} pickup ${order.pickupCode}; confirmation is the dispatch event. Identity is simulated.`,
-        command.collector.trim(),
+        `${command.kind} pickup ${order.shNo}; engineer identity ${command.identity ?? "not applicable"}; QR confirmation is the digital signature and dispatch event. Identity is simulated.`,
+        command.kind === "Engineer" ? normalize(command.identity ?? command.collector) : command.collector.trim() || "QR scanner",
       );
       break;
     }
@@ -340,33 +363,25 @@ export function executeDemoCommand(
       }
       break;
     }
-    case "transferScan": {
+    case "transferScan":
+    case "transferScanBatch": {
       const sending = command.phase === "send";
       requireThat(
         transfer.status === (sending ? "Draft" : "In_Transit"),
         "Transfer is not at this scan stage.",
       );
-      const sn = normalize(command.value);
       const scans = sending ? next.sentScans : next.receivedScans;
-      requireThat(
-        !scans.includes(sn),
-        "Duplicate SN. Each unit must be scanned once at this warehouse.",
-      );
-      requireThat(
-        transfer.serials.includes(sn),
-        "Unexpected / wrong SN. It is not in the expected transfer list.",
-      );
-      const serial = stock.serials.find((s) => s.serialNumber === sn);
-      requireThat(
-        serial &&
-          serial.sku === transfer.sku &&
-          serial.condition === transfer.condition &&
-          serial.warehouseCode === transfer.sourceWarehouse &&
-          serial.status === (sending ? "In_Stock" : "In_Transit") &&
-          (!sending || serial.locationCode === transfer.sourceLocation),
-        "SN state, warehouse, location or condition does not match the transfer.",
-      );
-      scans.push(sn);
+      const values = command.type === "transferScanBatch" ? command.values : [command.value];
+      requireThat(values.length > 0, "Scan or paste at least one SN.");
+      const batch = values.map(normalize);
+      requireThat(new Set(batch).size === batch.length, "Duplicate SN in batch.");
+      for (const sn of batch) {
+        requireThat(!scans.includes(sn), "Duplicate SN. Each unit must be scanned once at this warehouse.");
+        requireThat(transfer.serials.includes(sn), "Unexpected / wrong SN. It is not in the expected transfer list.");
+        const serial = stock.serials.find((s) => s.serialNumber === sn);
+        requireThat(serial && serial.sku === transfer.sku && serial.condition === transfer.condition && serial.warehouseCode === transfer.sourceWarehouse && serial.status === (sending ? "In_Stock" : "In_Transit") && (!sending || serial.locationCode === transfer.sourceLocation), "SN state, warehouse, location or condition does not match the transfer.");
+      }
+      scans.push(...batch);
       break;
     }
     case "transferOut": {
@@ -723,9 +738,21 @@ export function demoMetrics(session: DemoSession) {
   };
 }
 
-export function traceDemo(stock: WmsState, sn: string) {
+export function traceDemo(
+  stock: WmsState,
+  sn: string,
+): Array<StockTransaction & { actor: string; result: string }> {
   const serial = stock.serials.find((s) => s.serialNumber === normalize(sn));
-  if (!serial) return [];
+  if (!serial) {
+    const order = stock.outboundOrders.find((item) => item.shNo === normalize(sn) || item.pickupCode === normalize(sn) || item.lines.some((line) => line.workOrderNo?.toUpperCase() === normalize(sn)));
+    const transfer = stock.transfers.find((item) => item.transferNo === normalize(sn));
+    if (order) {
+      const references = [order.shNo, order.pickupCode, ...order.lines.map((line) => line.workOrderNo)].filter(Boolean);
+      return stock.transactions.filter((txn) => txn.businessReference && references.includes(txn.businessReference)).map((txn) => ({ ...txn, actor: txn.actor ?? "Demo operator", result: "Recorded" })).sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+    }
+    if (transfer) return stock.transactions.filter((txn) => txn.businessReference === transfer.transferNo || transfer.serials.includes(txn.serialNumber ?? "")).map((txn) => ({ ...txn, actor: txn.actor ?? "Demo operator", result: "Recorded" })).sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+    return [];
+  }
   const orderRefs = stock.outboundOrders
     .filter((o) =>
       o.lines.some((l) => l.scannedSerials.includes(serial.serialNumber)),
@@ -733,9 +760,9 @@ export function traceDemo(stock: WmsState, sn: string) {
     .map((o) => o.shNo);
   return stock.transactions
     .filter(
-      (t) =>
-        t.serialNumber === serial.serialNumber ||
-        (!t.serialNumber &&
+        (t) =>
+          t.serialNumber === serial.serialNumber ||
+          (!t.serialNumber &&
           t.businessReference &&
           (orderRefs.includes(t.businessReference) ||
             t.businessReference === serial.relatedTransferNo)),

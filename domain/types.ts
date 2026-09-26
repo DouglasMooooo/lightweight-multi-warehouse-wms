@@ -86,10 +86,12 @@ export interface SerialNumber {
   status: SerialStatus;
   relatedShNo?: string;
   relatedTransferNo?: string;
+  relatedWorkOrderNo?: string;
 }
 
 export interface OutboundLine {
   id: string;
+  workOrderNo?: string;
   sku: string;
   model: string;
   requiredQty: number;

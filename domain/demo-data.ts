@@ -53,6 +53,7 @@ export const demoState: WmsState = {
     { id: "sn-1", serialNumber: "EQ48S260700001", sku: "97-223-00107-00", model: "EQ4800-S", warehouseCode: "SYD", locationCode: "FLEX-01", condition: "New", status: "In_Stock" },
     { id: "sn-2", serialNumber: "EQ48S260700002", sku: "97-223-00107-00", model: "EQ4800-S", warehouseCode: "SYD", locationCode: "FLEX-01", condition: "New", status: "In_Stock" },
     { id: "sn-3", serialNumber: "EQ48S260700003", sku: "97-223-00107-00", model: "EQ4800-S", warehouseCode: "SYD", locationCode: "FLEX-01", condition: "New", status: "In_Stock" },
+    { id: "sn-6", serialNumber: "EQ48S260700004", sku: "97-223-00107-00", model: "EQ4800-S", warehouseCode: "SYD", locationCode: "FLEX-01", condition: "New", status: "In_Stock" },
     { id: "sn-4", serialNumber: "60E5M4805C3F242", sku: "97-223-00107-00", model: "EQ4800-S", condition: "New", status: "Outbound", relatedShNo: "SH-2607-00165610" },
     { id: "sn-5", serialNumber: "CQ6M260700091", sku: "97-229-00012-00", model: "CQ6-M", warehouseCode: "SYD", locationCode: "FLEX-01", condition: "Repair_Good", status: "In_Stock" },
   ],
@@ -68,7 +69,7 @@ export const demoState: WmsState = {
       customerLabel: "Service replacement",
       erpSyncStatus: "Pending",
       lines: [
-        { id: "line-1", sku: "97-223-00107-00", model: "EQ4800-S", requiredQty: 2, requiredCondition: "New", allocatedQty: 2, preparedQty: 2, dispatchedQty: 0, allocationLocation: "FLEX-01", allocations: [], scannedSerials: [] },
+        { id: "line-1", workOrderNo: "WO-SYD-2607-0042", sku: "97-223-00107-00", model: "EQ4800-S", requiredQty: 2, requiredCondition: "New", allocatedQty: 2, preparedQty: 2, dispatchedQty: 0, allocationLocation: "FLEX-01", allocations: [], scannedSerials: [] },
       ],
     },
     {
@@ -86,7 +87,7 @@ export const demoState: WmsState = {
     },
   ],
   transfers: [
-    { id: "tr-1", transferNo: "TR-SYD-MEL-00018", sourceWarehouse: "SYD", destinationWarehouse: "MEL", status: "Draft", sku: "97-223-00107-00", model: "EQ4800-S", condition: "New", qty: 1, serials: ["EQ48S260700003"], sourceLocation: "FLEX-01" },
+    { id: "tr-1", transferNo: "TR-SYD-MEL-00018", sourceWarehouse: "SYD", destinationWarehouse: "MEL", status: "Draft", sku: "97-223-00107-00", model: "EQ4800-S", condition: "New", qty: 2, serials: ["EQ48S260700003", "EQ48S260700004"], sourceLocation: "FLEX-01" },
   ],
   transactions: [
     { id: "txn-prepared", at: "2026-07-27T10:02:00+10:00", type: "Prepared", warehouseCode: "SYD", sku: "97-223-00107-00", model: "EQ4800-S", qty: 2, condition: "New", fromLocation: "FLEX-01", businessReference: "SH-2607-00175008", remark: "Prepared reservation; physical quantity unchanged." },

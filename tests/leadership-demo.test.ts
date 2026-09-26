@@ -41,7 +41,7 @@ describe("leadership demo transaction boundaries", () => {
     ).toThrow("Wrong SN");
     const ready = execute(first, { type: "pick", value: "EQ48S260700002" });
     expect(ready.stock.inventory[0]).toMatchObject({
-      physicalQty: 3,
+      physicalQty: 4,
       frozenQty: 2,
     });
     expect(ready.stock.outboundOrders[0].status).toBe("Ready_for_Pickup");
@@ -55,8 +55,9 @@ describe("leadership demo transaction boundaries", () => {
       const command = {
         type: "collect" as const,
         kind,
-        reference: "SYD-00265",
+        reference: kind === "Engineer" ? "WO-SYD-2607-0042" : "SYD-00265",
         collector: kind === "Engineer" ? "Alex Chen" : "Demo Driver",
+        identity: kind === "Engineer" ? "ENG-2048" : undefined,
       };
       expect(() => execute(createDemoSession(), command)).toThrow(
         "Ready for Pickup",
@@ -66,7 +67,7 @@ describe("leadership demo transaction boundaries", () => {
       );
       const collected = execute(ready, command);
       expect(collected.stock.inventory[0]).toMatchObject({
-        physicalQty: 1,
+        physicalQty: 2,
         frozenQty: 0,
       });
       expect(collected.stock.serials[0].status).toBe("Outbound");
@@ -86,28 +87,38 @@ describe("leadership demo transaction boundaries", () => {
       execute(ready, {
         type: "collect",
         kind: "Engineer",
-        reference: "SYD-00265",
+        reference: "WO-SYD-2607-0042",
         collector: "Other",
+        identity: "ENG-0000",
       }),
     ).toThrow("not authorised");
-    expect(() =>
-      execute(ready, {
+    const driverPickup = execute(ready, {
         type: "collect",
         kind: "Driver",
         reference: "SYD-00265",
         collector: " ",
-      }),
-    ).toThrow("name is required");
+      });
+    expect(driverPickup.collection).toMatchObject({ kind: "Driver", collector: "QR scanner" });
     ready.stock.serials[0].condition = "Repair";
     expect(() =>
       execute(ready, {
         type: "collect",
         kind: "Engineer",
-        reference: "SYD-00265",
+        reference: "WO-SYD-2607-0042",
         collector: "Alex Chen",
+        identity: "ENG-2048",
       }),
     ).toThrow("no longer matches");
-    expect(ready.stock.inventory[0].physicalQty).toBe(3);
+    expect(ready.stock.inventory[0].physicalQty).toBe(4);
+  });
+  it("requires the engineer identity and work-order QR digital signature", () => {
+    const ready = prepared();
+    expect(() => execute(ready, { type: "collect", kind: "Engineer", reference: "WO-SYD-2607-0042", collector: "Alex Chen", identity: "ENG-0000" })).toThrow("not authorised");
+    expect(() => execute(ready, { type: "collect", kind: "Engineer", reference: "SH-2607-00175008", collector: "Alex Chen", identity: "ENG-2048" })).toThrow("work order QR");
+    const signed = execute(ready, { type: "collect", kind: "Engineer", reference: "WO-SYD-2607-0042", collector: "Alex Chen", identity: "ENG-2048" });
+    expect(signed.collection).toMatchObject({ kind: "Engineer", identity: "ENG-2048" });
+    expect(signed.stock.serials.slice(0, 2).map((serial) => serial.relatedWorkOrderNo)).toEqual(["WO-SYD-2607-0042", "WO-SYD-2607-0042"]);
+    expect(traceDemo(signed.stock, "WO-SYD-2607-0042").map((txn) => txn.type)).toContain("Outbound");
   });
   it("receives matched and missing-SH returns; rejects duplicates and partial batch effects", () => {
     const fresh = createDemoSession();
@@ -154,7 +165,8 @@ describe("leadership demo transaction boundaries", () => {
         value: "EQ48S260700003",
       }),
     ).toThrow("Duplicate");
-    const sent = execute(scanned, { type: "transferOut" });
+    const batch = execute(scanned, { type: "transferScanBatch", phase: "send", values: ["EQ48S260700004"] });
+    const sent = execute(batch, { type: "transferOut" });
     expect(sent.receivedScans).toEqual([]);
     expect(demoMetrics(sent).Physical + demoMetrics(sent)["In Transit"]).toBe(
       demoMetrics(fresh).Physical,
@@ -169,11 +181,7 @@ describe("leadership demo transaction boundaries", () => {
         value: "EQ48S260700002",
       }),
     ).toThrow("Unexpected");
-    const actual = execute(sent, {
-      type: "transferScan",
-      phase: "receive",
-      value: "EQ48S260700003",
-    });
+    const actual = execute(sent, { type: "transferScanBatch", phase: "receive", values: ["EQ48S260700003", "EQ48S260700004"] });
     expect(() =>
       execute(actual, { type: "transferIn", location: "FLEX-01" }),
     ).toThrow("Invalid location");
@@ -188,6 +196,13 @@ describe("leadership demo transaction boundaries", () => {
     });
     expect(auditDemo(received.stock)).toEqual([]);
     expect(demoMetrics(received).Physical).toBe(demoMetrics(fresh).Physical);
+  });
+  it("validates transfer SN upload batches atomically", () => {
+    const fresh = createDemoSession();
+    expect(() => execute(fresh, { type: "transferScanBatch", phase: "send", values: ["EQ48S260700003", "EQ48S260700001"] })).toThrow("Unexpected");
+    expect(fresh.sentScans).toEqual([]);
+    const scanned = execute(fresh, { type: "transferScanBatch", phase: "send", values: [" eq48s260700003 ", "EQ48S260700004"] });
+    expect(scanned.sentScans).toEqual(["EQ48S260700003", "EQ48S260700004"]);
   });
   it("preserves native repair lifecycle, identity, quantity and append-only ledger", () => {
     const received = execute(createDemoSession(), {
@@ -216,12 +231,23 @@ describe("leadership demo transaction boundaries", () => {
     expect(auditDemo(repaired.stock)).toEqual([]);
     expect(() => execute(repaired, complete)).toThrow("active repair job");
   });
+  it("completes a validated repair SN batch in one atomic command", () => {
+    const received = execute(createDemoSession(), { type: "return", serials: ["60E5M4805C3F242", "DEMO-RETURN-NO-SH"], location: "REPAIR-01" });
+    let ready = execute(received, { type: "startRepair", sn: "60E5M4805C3F242" });
+    ready = execute(ready, { type: "startRepair", sn: "DEMO-RETURN-NO-SH" });
+    expect(() => execute(ready, { type: "completeRepairBatch", sns: ["60E5M4805C3F242", "UNKNOWN"], location: "FLEX-01" })).toThrow("In Repair");
+    expect(ready.stock.repairJobs?.every((job) => job.status === "In_Repair")).toBe(true);
+    const complete = execute(ready, { type: "completeRepairBatch", sns: ["60E5M4805C3F242", "DEMO-RETURN-NO-SH"], location: "FLEX-01" });
+    expect(complete.stock.repairJobs?.map((job) => job.status)).toEqual(["Repair_Good", "Repair_Good"]);
+    expect(demoMetrics(complete).Physical).toBe(demoMetrics(ready).Physical);
+  });
   it("does not flag a valid return after collection as an outbound mismatch", () => {
     const collected = execute(prepared(), {
       type: "collect",
       kind: "Engineer",
-      reference: "SYD-00265",
+      reference: "WO-SYD-2607-0042",
       collector: "Alex Chen",
+      identity: "ENG-2048",
     });
     const returned = execute(collected, {
       type: "return",
@@ -256,7 +282,7 @@ describe("leadership demo transaction boundaries", () => {
     });
     const read = service.read();
     read.stock.inventory[0].physicalQty = 999;
-    expect(service.read().stock.inventory[0].physicalQty).toBe(3);
+    expect(service.read().stock.inventory[0].physicalQty).toBe(4);
     expect(new LeadershipDemoService().read().pickScans).toEqual([]);
     const reset = service.reset();
     expect(reset).toMatchObject({
