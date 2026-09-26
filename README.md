@@ -1,5 +1,9 @@
 # Lightweight Multi-Warehouse WMS Prototype
 
+## Leadership workflow demo
+
+Open `/demo` for the resettable, synthetic leadership preview. It runs without a database or ERP connection and includes scan-driven preparation, digital pickup, faulty return, transfer, repair, location visualization, SN trace and audit scenarios. See [the presenter guide and capability boundaries](docs/LEADERSHIP_DEMO_V2.md). Existing operational routes are preserved.
+
 ## Project
 
 This repository is a working internal WMS prototype for multi-warehouse physical execution. It is based on observed Sydney warehouse workflows and a validated spreadsheet reference.

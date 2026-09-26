@@ -1,0 +1,67 @@
+# WMS leadership workflow preview
+
+Open `/demo`. This is an isolated, synthetic browser-session prototype. It never calls operational WMS APIs, ERP adapters or a database. Existing operational routes remain available; their navigation includes **Leadership Demo Scenarios**.
+
+## Run without a database
+
+The existing Prisma install hook requires a URL string to generate its client but does not connect. From the repository in PowerShell:
+
+```powershell
+$env:DATABASE_URL = 'postgresql://demo:demo@127.0.0.1:1/demo'
+pnpm install --frozen-lockfile
+pnpm dev --port 3100
+```
+
+Visit `http://localhost:3100/demo`. No database server is required for this route. The dummy URL is deliberately unusable. Do not copy production environment files. Existing database-backed routes still require their existing configuration.
+
+## Presenter walkthrough
+
+1. **Outbound:** Start Pick Task. Scan/type `FLEX-01`, `EQ48S260700001`, then `EQ48S260700002`, pressing Enter each time. The last scan atomically freezes two units and makes `SH-2607-00175008` Ready for Pickup. Physical remains unchanged. Print the batch label for `SYD-00265`.
+2. **Digital Pickup:** The simulated engineer Alex Chen is authorised for this shipment. Confirm Collection dispatches both units once. Alternatively reset/reprepare, choose Logistics driver, enter `SYD-00265` and a collector name, then Confirm Handover. No second dispatch action is required.
+3. **Faulty Return:** Enter `60E5M4805C3F242` and optionally `DEMO-RETURN-NO-SH` on separate lines. Confirm `REPAIR-01` and Receive physically. Both have known synthetic product identity. The first matches its SH; the second receives physically and creates `MISSING_SH_REFERENCE` for After-sales. Unknown SKU identity is never guessed. Invalid batches cannot partially post.
+4. **Transfer:** `TR-SYD-MEL-00018` expects `EQ48S260700003`. Scan at Sydney and Confirm Transfer Out. Independently scan the actual unit at Melbourne, confirm `RECEIVING-01`, then Transfer In. Source scans cannot prove receipt. Missing, unexpected/wrong and duplicate scans are rejected.
+5. **Repair → Good:** Scan a received faulty SN once. Start repair, then confirm a good-stock location and Mark repair completed. Native `Pending_Repair → In_Repair → Repair_Good` is preserved. The SN and total physical quantity are unchanged; ledger and audit evidence are appended.
+6. **Warehouse Map:** Click rack/service locations for SKU/model, SNs, physical/frozen/available quantities, conditions, occupancy and recent movements. Sydney and Melbourne are selectable. Fixed, flexible, temporary, repair, dispatch and quarantine areas have distinct states.
+7. **SN Trace:** Search an outbound, returned or transferred SN. Each movement shows timestamp, location, business reference, operator/source and result. Prepared explicitly means a source reservation, not a physical move.
+8. **Audit / Exceptions:** Live checks reconcile the session. Sample discrepancies evaluates a deliberately inconsistent, separate read-only fixture to demonstrate all seven rules. Missing-SH exceptions appear in the live queue.
+9. **AI Audit Concept:** Select an example question. Responses are fixed templates with deterministic demo counts. The seven-unit example is labelled illustrative, not a claim about live balances. No AI API or inventory mutation is available.
+10. **Reporting:** Current metrics and 7/30-day rolling movement windows use structured session data. Outbound Today uses actual `outboundAt` in Sydney time. Current stock is not presented as historical closing inventory. Scheduled reporting and BI remain concepts.
+11. **Reset Demo:** Restores stock, orders, collection evidence, repair jobs, transfers, exceptions, ledger, audit, scan drafts, selections and concept responses. Refreshing/leaving the route also starts a fresh session. No browser cleanup is needed.
+
+## Architecture
+
+`LeadershipDemo UI → LeadershipDemoService → domain commands / existing operations → DemoSessionRepository`.
+
+- A cloned session is committed only after successful validation; failures cannot expose partial state.
+- InventoryBalance remains quantity authority, SerialNumber remains identity, and stock transactions are append-only within the session.
+- Existing pure operations handle preparation, dispatch, return and transfer. Demo guards add scan evidence/readiness. Existing native repair rules govern repair start/completion.
+- Quantity, reconciliation, location, reporting and trace read models stay outside React.
+- No operational server service, integration adapter, schema or migration is replaced. The optional `StockTransaction.actor` field adds provenance for demo movements while preserving compatibility.
+- Fixtures reuse existing products, locations and requested references. This isolated session normalizes product counts to known synthetic SNs so the opening baseline reconciles. The outbound starts before preparation to demonstrate picking. `TEMP-01`, `QUARANTINE-01` and `DEMO-RETURN-NO-SH` are explicitly synthetic additions.
+
+## Capability boundaries
+
+**Existing prototype:** PostgreSQL repositories, atomic preparation, relational SN readiness, transfer receipt, repair lifecycle, map/reporting queries, scan review, bilingual operational UI and guarded import/cutover tooling. This task does not run those tools or alter their operational behaviour.
+
+**Demo enhancements:** Isolated leadership route, desktop/PDA execution screens, scenario navigation, simulated digital collection, missing-documentation receipt, independent transfer evidence, deterministic audits, trace timeline, management views and complete reset.
+
+**Concept-only:** Real identity verification, AI analysis, scheduled report delivery and BI connectivity.
+
+**Not implemented/connected:** Production ERP, Ruiyun SSO, carriers, external AI, production authentication, production database or new infrastructure.
+
+**Limits:** English-only leadership presentation; one outbound shipment and one transfer fixture; all-or-nothing transfer receipt; keyboard-wedge/plain-code scans, no camera decoder; schematic floor geometry; occupied/empty instead of capacity percentage; in-memory per-tab sessions without cross-device persistence; investigation suggestions without documentation-resolution mutation. Existing bilingual operational screens are unchanged.
+
+## Git baseline
+
+This branch starts at `96b9ca9` from the existing `agent/sprint-2-ledger-parity` checkout to preserve its working flows. That baseline is 40 commits ahead of `origin/main` (`51261cc`), with existing PRs #1 and #2 still open. The requested PR against main therefore includes inherited work. Review the new leadership commits separately. This task introduces no new migration or reference-workbook changes and does not merge automatically.
+
+## Verification record
+
+- `pnpm test`: 20 files / 221 tests, including 10 leadership tests covering invalid scans, atomicity, pickup replay, independent receipt, repair conservation, audit rules and reset isolation.
+- Required gates: `pnpm typecheck`, `pnpm lint`, `pnpm build`, `git diff --check`.
+- Desktop browser walkthrough at 1440px: outbound, engineer pickup, matched/missing-SH receiving, native repair completion, transfer dispatch/independent receipt, map details, trace, live/sample audit and reset.
+- PDA walkthrough at 390px: outbound and driver handover. All 12 screens checked for document overflow; map additionally inspected at 360px.
+- Screenshots inspected for overview, pick task, collection, map and AI concept. Corrected a rack CSS utility collision and placed the PDA scan action before task details.
+- Fast execution tests cover equal-millisecond event ordering.
+
+Browser verification uses the isolated local demo. Database-backed routes, production integrations, physical scanner hardware and physical printing are not claimed as newly tested.
