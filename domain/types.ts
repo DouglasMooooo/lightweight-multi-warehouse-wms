@@ -151,6 +151,7 @@ export interface TransferOrder {
 
 export interface StockTransaction {
   id: string;
+  actor?: string;
   at: string;
   recordedAt?: string;
   effectiveAt?: string;
