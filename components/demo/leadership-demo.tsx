@@ -24,6 +24,7 @@ import {
   Truck,
   Warehouse,
   Wrench,
+  ClipboardList,
 } from "lucide-react";
 import {
   auditDemo,
@@ -37,7 +38,8 @@ import {
 import { LeadershipDemoService } from "@/services/leadership-demo-service";
 
 const pages = [
-  ["Overview", LayoutDashboard, "Live execution queue and warehouse position"],
+  ["Overview", LayoutDashboard, "Your shift, your tasks, and the next action"],
+  ["Inbound & Putaway", ClipboardList, "Receive an ASN, verify serials and put stock away"],
   ["Outbound", PackageCheck, "Verify location and scan two units to prepare"],
   [
     "Digital Pickup",
@@ -167,6 +169,9 @@ export function LeadershipDemo() {
   const [goodLocation, setGoodLocation] = useState("FLEX-01");
   const [destination, setDestination] = useState("");
   const [transferBatchText, setTransferBatchText] = useState("");
+  const [inboundBatchText, setInboundBatchText] = useState("");
+  const [inboundReference, setInboundReference] = useState("ASN-SYD-DEMO-0007");
+  const [inboundLocation, setInboundLocation] = useState("");
   const [repairBatchText, setRepairBatchText] = useState("");
   const [repairBatchSns, setRepairBatchSns] = useState<string[]>([]);
   const [mapWarehouse, setMapWarehouse] = useState("SYD");
@@ -247,6 +252,9 @@ export function LeadershipDemo() {
     setGoodLocation("FLEX-01");
     setDestination("");
     setTransferBatchText("");
+    setInboundBatchText("");
+    setInboundReference("ASN-SYD-DEMO-0007");
+    setInboundLocation("");
     setRepairBatchText("");
     setRepairBatchSns([]);
     setMapWarehouse("SYD");
@@ -363,38 +371,69 @@ export function LeadershipDemo() {
           )}
 
           {zh(
+            page === "Inbound & Putaway" && (
+              <div className="demo-two-col">
+                <Panel title={zh("ASN receiving task · simulated training document")}>
+                  <Tag tone={session.inboundReceived ? "green" : "amber"}>{zh(session.inboundReceived ? "Received · put away at RECEIVING-01" : "Expected · waiting at receiving dock")}</Tag>
+                  <dl className="demo-facts">
+                    <div><dt>{zh("ASN / supplier delivery")}</dt><dd>{zh("ASN-SYD-DEMO-0007")}</dd></div>
+                    <div><dt>{zh("Warehouse / receiving location")}</dt><dd>{zh("Sydney · RECEIVING-01")}</dd></div>
+                    <div><dt>{zh("Expected model / SKU")}</dt><dd>{zh("EQ4800-S · 97-223-00107-00")}</dd></div>
+                    <div><dt>{zh("Expected quantity / condition")}</dt><dd>{zh("2 units · New")}</dd></div>
+                  </dl>
+                  {!session.inboundReceived ? <>
+                    <label className="demo-field">{zh("Scan / confirm ASN")}<input value={inboundReference} onChange={(event) => setInboundReference(event.target.value)} placeholder={zh("ASN-SYD-DEMO-0007")} /></label>
+                    <label className="demo-field">{zh("Scan receiving location QR")}<input value={inboundLocation} onChange={(event) => setInboundLocation(event.target.value)} placeholder={zh("RECEIVING-01")} /></label>
+                    <label className="demo-field">{zh("Scan item serials · one per line")}
+                      <textarea value={inboundBatchText} onChange={(event) => setInboundBatchText(event.target.value)} rows={4} placeholder={zh("DEMO-IN-260927-001\nDEMO-IN-260927-002")} />
+                    </label>
+                    <div className="demo-hint"><strong>{zh("Receiving checklist")}</strong><p>{zh("Check carton quantity and model against the ASN. Inspect condition before accepting. Batch validation is all-or-nothing.")}</p><code>{zh("DEMO-IN-260927-001")}</code><code>{zh("DEMO-IN-260927-002")}</code></div>
+                    <button className="demo-primary" disabled={!inboundBatchText.trim() || !inboundLocation.trim()} onClick={() => { const values = inboundBatchText.split(/[\s,;]+/).filter(Boolean); if (run({ type: "receiveInbound", reference: inboundReference, location: inboundLocation, values }, "ASN receipt posted to RECEIVING-01. Scan the destination rack to complete putaway.")) { setInboundBatchText(""); setInboundLocation(""); } }}>{zh("Confirm receipt into receiving area")}<ArrowRight size={18} /></button>
+                  </> : !session.inboundPutaway ? <>
+                    <div className="demo-hint"><strong>{zh("Receipt accepted · putaway task created")}</strong><p>{zh("Stock is now in RECEIVING-01. Scan a storage rack and scan both SNs before moving the batch.")}</p></div>
+                    <label className="demo-field">{zh("Scan destination storage rack") }<input value={inboundLocation} onChange={(event) => setInboundLocation(event.target.value)} placeholder={zh("R1-4-2-L")} /></label>
+                    <label className="demo-field">{zh("Scan received SNs for putaway · one per line")}<textarea value={inboundBatchText} onChange={(event) => setInboundBatchText(event.target.value)} rows={4} placeholder={zh("DEMO-IN-260927-001\nDEMO-IN-260927-002")} /></label>
+                    <button className="demo-primary" disabled={!inboundBatchText.trim() || !inboundLocation.trim()} onClick={() => { const values = inboundBatchText.split(/[\s,;]+/).filter(Boolean); if (run({ type: "putawayInbound", location: inboundLocation, values }, "Putaway completed. Both SN locations and warehouse balances moved to the storage rack.")) { setInboundBatchText(""); setInboundLocation(""); } }}>{zh("Confirm rack putaway")}<ArrowRight size={18} /></button>
+                  </> : <div className="demo-complete"><PackageCheck size={42} /><h3>{zh("Receipt and putaway complete")}</h3><p>{zh("2 units · New · stored at the confirmed rack. Inventory, SN, movement and audit records updated.")}</p><ul className="demo-evidence">{["DEMO-IN-260927-001", "DEMO-IN-260927-002"].map((sn) => <li key={sn}><Check size={16} />{zh(sn)}</li>)}</ul><button className="demo-primary" onClick={() => { setTrace("DEMO-IN-260927-001"); setTraceQuery("DEMO-IN-260927-001"); navigate("SN Trace"); }}>{zh("Continue to full trace")}<ArrowRight size={18} /></button></div>}
+                </Panel>
+                <Panel title={zh("Operator standard work")}>
+                  <ol className="demo-standard-work">{["Compare supplier delivery with the expected ASN.", "Check the model and SKU label on each unit.", "Inspect packaging and physical condition; quarantine damaged or mismatched stock.", "Scan the receiving location, then scan every unit SN.", "Resolve quantity / identity differences before posting the batch.", "Put accepted stock into the designated storage rack and confirm the location movement."].map((step, index) => <li key={step}><span>{index + 1}</span>{zh(step)}</li>)}</ol>
+                  <p className="demo-demo-boundary">{zh("Training fixture only. ASN, supplier and SN labels are synthetic; no ERP receipt is sent.")}</p>
+                </Panel>
+              </div>
+            ),
+          )}
+
+          {zh(
             page === "Overview" && (
               <>
                 <div className="demo-hero">
                   <div>
-                    <p className="demo-eyebrow">{zh("NEXT TASK · SYDNEY")}</p>
+                    <p className="demo-eyebrow">{zh("WAREHOUSE OPERATOR SHIFT · SYDNEY")}</p>
                     <h2>
                       {zh(
-                        orderStatus === "To prepare"
-                          ? "Prepare the service replacement."
-                          : session.collection
-                            ? "Collection complete. Keep work moving."
-                            : "Two units ready. Verify collection.",
+                        !session.inboundReceived
+                          ? "Receive today's inbound delivery."
+                          : !session.inboundPutaway
+                            ? "Put away the accepted units."
+                          : orderStatus === "To prepare"
+                            ? "Next: pick the service replacement."
+                            : session.collection
+                              ? "Pickup complete. Continue with warehouse work."
+                              : "Two units ready. Verify collection.",
                       )}
                     </h2>
-                    <p>
-                      {zh(order.shNo)}
-                      {zh("· EQ4800-S · 2 units · FLEX-01")}
-                    </p>
+                    <p>{zh(!session.inboundReceived ? "ASN-SYD-DEMO-0007 · EQ4800-S · 2 units · RECEIVING-01" : !session.inboundPutaway ? "ASN-SYD-DEMO-0007 · RECEIVING-01 → storage rack · 2 units" : `${order.shNo} · EQ4800-S · 2 units · FLEX-01`)}</p>
                     <button
                       className="demo-primary"
                       onClick={() =>
                         navigate(
-                          orderStatus === "To prepare"
-                            ? "Outbound"
-                            : "Digital Pickup",
+                          !session.inboundReceived || !session.inboundPutaway ? "Inbound & Putaway" : orderStatus === "To prepare" ? "Outbound" : "Digital Pickup",
                         )
                       }
                     >
                       {zh(
-                        orderStatus === "To prepare"
-                          ? "Start Pick Task"
-                          : "Open pickup",
+                        !session.inboundReceived ? "Start receiving" : !session.inboundPutaway ? "Continue putaway" : orderStatus === "To prepare" ? "Start Pick Task" : "Open pickup",
                       )}
                       <ArrowRight size={18} />
                     </button>
@@ -418,10 +457,16 @@ export function LeadershipDemo() {
                   )}
                 </div>
                 <div className="demo-section-title">
-                  <h2>{zh("Leadership demo scenarios")}</h2>
+                  <h2>{zh("Today's warehouse work")}</h2>
                   <span>
                     {zh("Run a workflow. Inspect the evidence. Reset.")}
                   </span>
+                </div>
+                <div className="demo-shift-tasks">
+                  {(["Inbound & Putaway", "Outbound", "Digital Pickup", "Transfer", "Faulty Return", "Repair → Good", "SN Trace"] as Page[]).map((name, index) => {
+                    const done = name === "Inbound & Putaway" ? session.inboundPutaway : name === "Outbound" ? line.preparedQty === 2 : name === "Digital Pickup" ? Boolean(session.collection) : name === "Transfer" ? transfer.status === "Received" : name === "Faulty Return" ? (stock.repairJobs?.length ?? 0) > 0 : name === "Repair → Good" ? Boolean(stock.repairJobs?.some((job) => job.status === "Repair_Good")) : false;
+                    return <button key={name} onClick={() => navigate(name)} className={done ? "done" : ""}><span>{done ? <Check size={16} /> : String(index + 1).padStart(2, "0")}</span><strong>{zh(name)}</strong><small>{zh(done ? "已完成 · 查看记录" : "待作业 · 点击开始")}</small><ArrowRight size={16} /></button>;
+                  })}
                 </div>
                 <div className="demo-scenarios">
                   {zh(

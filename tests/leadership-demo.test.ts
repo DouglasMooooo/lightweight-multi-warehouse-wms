@@ -18,6 +18,24 @@ function prepared() {
   return execute(session, { type: "pick", value: "EQ48S260700002" });
 }
 describe("leadership demo transaction boundaries", () => {
+  it("receives an expected ASN batch atomically and binds serials without double-counting", () => {
+    const fresh = createDemoSession();
+    expect(() => execute(fresh, { type: "receiveInbound", reference: "ASN-SYD-DEMO-0007", location: "RECEIVING-01", values: ["DEMO-IN-260927-001", "WRONG"] })).toThrow("no stock was posted");
+    expect(fresh.stock.inventory.some((balance) => balance.locationCode === "RECEIVING-01" && balance.physicalQty > 0)).toBe(false);
+    const received = execute(fresh, { type: "receiveInbound", reference: "ASN-SYD-DEMO-0007", location: "RECEIVING-01", values: ["DEMO-IN-260927-001", "DEMO-IN-260927-002"] });
+    expect(received.stock.inventory.find((balance) => balance.locationCode === "RECEIVING-01" && balance.sku === "97-223-00107-00")).toMatchObject({ physicalQty: 2, availableQty: 2 });
+    expect(received.stock.serials.filter((serial) => serial.serialNumber.startsWith("DEMO-IN-")).map((serial) => serial.status)).toEqual(["In_Stock", "In_Stock"]);
+    expect(received.stock.transactions.filter((txn) => txn.businessReference === "ASN-SYD-DEMO-0007")).toHaveLength(2);
+    expect(auditDemo(received.stock)).toEqual([]);
+    expect(() => execute(received, { type: "receiveInbound", reference: "ASN-SYD-DEMO-0007", location: "RECEIVING-01", values: ["DEMO-IN-260927-001", "DEMO-IN-260927-002"] })).toThrow("already been received");
+    expect(() => execute(received, { type: "putawayInbound", location: "RECEIVING-01", values: ["DEMO-IN-260927-001", "DEMO-IN-260927-002"] })).toThrow("storage rack");
+    const putaway = execute(received, { type: "putawayInbound", location: "R1-4-2-L", values: ["DEMO-IN-260927-001", "DEMO-IN-260927-002"] });
+    expect(putaway.stock.inventory.find((balance) => balance.locationCode === "RECEIVING-01" && balance.sku === "97-223-00107-00")).toMatchObject({ physicalQty: 0 });
+    expect(putaway.stock.inventory.find((balance) => balance.locationCode === "R1-4-2-L" && balance.sku === "97-223-00107-00")).toMatchObject({ physicalQty: 2 });
+    expect(putaway.stock.serials.filter((serial) => serial.serialNumber.startsWith("DEMO-IN-")).every((serial) => serial.locationCode === "R1-4-2-L")).toBe(true);
+    expect(traceDemo(putaway.stock, "DEMO-IN-260927-001").map((txn) => txn.type)).toEqual(["Inbound", "Move"]);
+    expect(auditDemo(putaway.stock)).toEqual([]);
+  });
   it("starts reconciled and freezes exactly once on the last valid scan", () => {
     const fresh = createDemoSession();
     expect(auditDemo(fresh.stock)).toEqual([]);

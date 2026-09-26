@@ -2,9 +2,9 @@ import { LeadershipDemo } from "@/components/demo/leadership-demo";
 import "./demo.css";
 
 export const metadata = {
-  title: "WMS 仓库作业预览 · 管理层演示",
+  title: "WMS 仓库人员实操全流程演练",
   description:
-    "中文仓库作业原型：扫码备货、数字取货、故障收货、跨仓调拨、维修、SN 追溯与审计。",
+    "仓库人员中文实操演练：ASN 到货验收、SN 扫描、货架上架、拣货出库、交接、调拨、故障返修与全流程追溯。",
 };
 export default function DemoPage() {
   return <LeadershipDemo />;

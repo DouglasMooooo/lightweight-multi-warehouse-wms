@@ -3,6 +3,7 @@ import {
   dispatchOutbound,
   dispatchTransfer,
   prepareOutbound,
+  registerSerial,
   receiveFaulty,
   receiveTransfer,
   scanOutboundSerial,
@@ -23,8 +24,12 @@ export interface DemoSession {
     identity?: string;
     at: string;
   };
+  inboundReceived: boolean;
+  inboundPutaway: boolean;
 }
 export type DemoCommand =
+  | { type: "receiveInbound"; reference: string; location: string; values: string[] }
+  | { type: "putawayInbound"; location: string; values: string[] }
   | { type: "location"; value: string }
   | { type: "pick"; value: string }
   | {
@@ -75,6 +80,14 @@ export function createDemoSession(): DemoSession {
     condition: "New",
   });
   stock.locations.push(
+    {
+      id: "demo-syd-receiving",
+      warehouseCode: "SYD",
+      code: "RECEIVING-01",
+      zone: "RECEIVING",
+      serviceZone: true,
+      active: true,
+    },
     {
       id: "demo-temp",
       warehouseCode: "SYD",
@@ -139,6 +152,8 @@ export function createDemoSession(): DemoSession {
     pickScans: [],
     sentScans: [],
     receivedScans: [],
+    inboundReceived: false,
+    inboundPutaway: false,
   };
 }
 
@@ -180,6 +195,52 @@ export function executeDemoCommand(
   const line = order.lines[0];
   const transfer = stock.transfers[0];
   switch (command.type) {
+    case "putawayInbound": {
+      const sns = command.values.map(normalize);
+      const expected = ["DEMO-IN-260927-001", "DEMO-IN-260927-002"];
+      const from = stock.inventory.find((item) => item.warehouseCode === "SYD" && item.locationCode === "RECEIVING-01" && item.sku === "97-223-00107-00" && item.condition === "New");
+      const target = normalize(command.location);
+      requireThat(next.inboundReceived && !next.inboundPutaway, "Receive the ASN before putaway; this batch must not be put away twice.");
+      requireThat(sns.length === 2 && new Set(sns).size === 2 && expected.every((sn) => sns.includes(sn)), "Scan the two received SNs exactly once.");
+      requireThat(stock.locations.some((item) => item.warehouseCode === "SYD" && item.code === target && item.active && !item.serviceZone && item.zone !== "RECEIVING"), "Choose an active Sydney storage rack, such as R1-4-2-L.");
+      requireThat(from && from.availableQty >= 2 && sns.every((sn) => stock.serials.some((serial) => serial.serialNumber === sn && serial.locationCode === "RECEIVING-01" && serial.status === "In_Stock")), "Receiving stock or SN location no longer matches the putaway task.");
+      const product = stock.products.find((item) => item.sku === "97-223-00107-00")!;
+      let to = stock.inventory.find((item) => item.warehouseCode === "SYD" && item.locationCode === target && item.sku === product.sku && item.condition === "New");
+      if (!to) { to = { id: uid(), warehouseCode: "SYD", locationCode: target, sku: product.sku, model: product.model, itemType: product.itemType, condition: "New", physicalQty: 0, frozenQty: 0, inTransitQty: 0, availableQty: 0 }; stock.inventory.push(to); }
+      from.physicalQty -= sns.length; from.availableQty = from.physicalQty - from.frozenQty;
+      to.physicalQty += sns.length; to.availableQty = to.physicalQty - to.frozenQty;
+      for (const sn of sns) {
+        stock.serials.find((serial) => serial.serialNumber === sn)!.locationCode = target;
+        stock.transactions.unshift({ id: uid(), at: timestamp(), type: "Move", warehouseCode: "SYD", sku: product.sku, model: product.model, serialNumber: sn, qty: 1, condition: "New", fromLocation: "RECEIVING-01", toLocation: target, businessReference: "ASN-SYD-DEMO-0007", actor: "Demo operator", remark: "Synthetic ASN putaway; same warehouse, SN and physical quantity preserved." });
+      }
+      audit(stock, "ASN putaway completed", "ASN-SYD-DEMO-0007", `${sns.length} units moved RECEIVING-01 → ${target}. Physical total unchanged.`, "Demo operator");
+      next.inboundPutaway = true;
+      break;
+    }
+    case "receiveInbound": {
+      const reference = "ASN-SYD-DEMO-0007";
+      const expected = ["DEMO-IN-260927-001", "DEMO-IN-260927-002"];
+      const values = command.values.map(normalize);
+      requireThat(!next.inboundReceived, "This ASN has already been received.");
+      requireThat(normalize(command.reference) === reference, "ASN does not match the expected receipt.");
+      requireThat(normalize(command.location) === "RECEIVING-01", "Scan receiving location RECEIVING-01 first.");
+      requireThat(values.length === expected.length && new Set(values).size === values.length && expected.every((sn) => values.includes(sn)), "Receipt mismatch. Scan the two expected SN labels once each; no stock was posted.");
+      const sku = "97-223-00107-00";
+      const product = stock.products.find((item) => item.sku === sku)!;
+      let balance = stock.inventory.find((item) => item.warehouseCode === "SYD" && item.locationCode === "RECEIVING-01" && item.sku === sku && item.condition === "New");
+      if (!balance) {
+        balance = { id: uid(), warehouseCode: "SYD", locationCode: "RECEIVING-01", sku, model: product.model, itemType: product.itemType, condition: "New", physicalQty: 0, frozenQty: 0, inTransitQty: 0, availableQty: 0 };
+        stock.inventory.push(balance);
+      }
+      // Post the physically received ASN quantity first, then bind identities against that balance.
+      balance.physicalQty += values.length;
+      balance.availableQty = balance.physicalQty - balance.frozenQty;
+      for (const serialNumber of values) stock = registerSerial(stock, { serialNumber, sku, warehouseCode: "SYD", locationCode: "RECEIVING-01", condition: "New" });
+      for (const serialNumber of values) stock.transactions.unshift({ id: uid(), at: timestamp(), type: "Inbound", warehouseCode: "SYD", sku, model: product.model, serialNumber, qty: 1, condition: "New", toLocation: "RECEIVING-01", businessReference: reference, actor: "Demo operator", remark: "Expected ASN receipt accepted; synthetic training fixture." });
+      audit(stock, "ASN received and put away", reference, `${values.length} units accepted into RECEIVING-01; verify condition and complete putaway.`, "Demo operator");
+      next.inboundReceived = true;
+      break;
+    }
     case "location": {
       requireThat(
         order.status === "Ready",
