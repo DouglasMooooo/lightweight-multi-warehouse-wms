@@ -61,8 +61,7 @@ This branch starts at `96b9ca9` from the existing `agent/sprint-2-ledger-parity`
 - `pnpm test`: 21 files / 229 tests, including 14 leadership tests covering work-order identity/QR, batch validation/completion atomicity, pickup replay, independent receipt, ASN receipt/putaway conservation, repair conservation, audit rules and reset isolation.
 - Required gates: `pnpm typecheck`, `pnpm lint`, `pnpm build`, `git diff --check`.
 - Browser walkthrough: atomic ASN receiving, rack putaway and SN timeline; outbound prep followed by automatic identity+work-order QR sign-off, multi-unit transfer upload in both warehouses, two-unit repair batch, map contents and work-order full lifecycle search.
-- PDA walkthrough at 390px: outbound and driver handover. All 12 screens checked for document overflow; map additionally inspected at 360px.
+- PDA walkthrough at a 390px viewport: automatic PDA mode, fixed thumb navigation, ASN receiving form and large touch targets. Outbound and driver handover remain supported; all 12 screens checked for document overflow and map inspected at 360px.
 - Fast execution tests cover equal-millisecond event ordering.
 
 Browser verification uses the isolated local demo. Database-backed routes, production integrations, physical scanner hardware and physical printing are not claimed as newly tested.
-

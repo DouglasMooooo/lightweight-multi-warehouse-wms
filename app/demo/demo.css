@@ -173,6 +173,10 @@
   align-items: center;
   gap: 15px;
 }
+.demo-topbar-actions { display: flex; align-items: center; gap: 8px; }
+.demo-mode-toggle { font-size: 12px !important; background: #edf6f1 !important; color: #176b5f !important; }
+.pda-shift-strip { display: none; }
+.pda-dock { display: none; }
 .demo-topbar > div > span {
   display: block;
   font-size: 11px;
@@ -518,6 +522,37 @@
   font-family: monospace;
   font-size: 14px;
 }
+.pda-mode .demo-sidebar { display: none; }
+.pda-mode .demo-main { width: min(100%, 520px); margin: 0 auto; min-height: 100vh; background: #f3f6f5; box-shadow: 0 0 32px #19362a12; }
+.pda-mode .demo-topbar { position: sticky; top: 0; z-index: 30; padding: 10px 14px; min-height: 62px; box-shadow: 0 2px 8px #18382a0b; }
+.pda-mode .demo-topbar > div > span { font-size: 9px; }
+.pda-mode .demo-topbar b { font-size: 12px; }
+.pda-mode .demo-topbar-actions { gap: 5px; }
+.pda-mode .demo-mode-toggle,.pda-mode .demo-reset { min-height: 42px; padding: 8px 10px !important; font-size: 10px !important; }
+.pda-mode .demo-content { padding: 14px 14px 28px; }
+.pda-mode .demo-heading { margin-bottom: 14px; }
+.pda-mode .demo-heading h1 { font-size: 25px; }
+.pda-mode .demo-heading > .demo-tag { margin-top: 8px; }
+.pda-mode .pda-shift-strip { display: block; padding: 8px 10px; margin: 0 0 12px; border-radius: 7px; background: #e7f4ee; color: #176b5f; font-size: 11px; }
+.pda-mode .pda-shift-strip .demo-live-dot { margin-right: 7px; }
+.pda-mode .demo-panel { padding: 17px 15px; border-radius: 12px; }
+.pda-mode .demo-two-col,.pda-mode .demo-three-col,.pda-mode .demo-issues { grid-template-columns: 1fr; gap: 0; }
+.pda-mode .demo-two-col > .demo-action-panel { order: -1; }
+.pda-mode .demo-field input,.pda-mode .demo-field select,.pda-mode .demo-field textarea { min-height: 52px; font-size: 16px; }
+.pda-mode .demo-field textarea { min-height: 112px; }
+.pda-mode .demo-scan { margin: 14px 0 18px; }
+.pda-mode .demo-scan label > div { min-height: 66px; border-width: 3px; }
+.pda-mode .demo-scan input { min-height: 60px; font-size: 20px; padding: 14px 12px; }
+.pda-mode .demo-scan button,.pda-mode .demo-primary,.pda-mode .demo-secondary { min-height: 54px; width: 100%; font-size: 15px; }
+.pda-mode .demo-hint { padding: 13px; margin: 14px 0; font-size: 12px; }
+.pda-mode .demo-shift-tasks { grid-template-columns: 1fr; gap: 8px; }
+.pda-mode .demo-shift-tasks button { min-height: 64px; }
+.pda-mode .pda-dock { position: fixed; z-index: 40; display: flex; left: 50%; bottom: 0; transform: translateX(-50%); width: min(100%, 520px); padding: 7px max(8px, env(safe-area-inset-right)) calc(7px + env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); gap: 2px; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; background: #fff; border-top: 1px solid #dbe4e5; box-shadow: 0 -4px 16px #19362a12; }
+.pda-mode .pda-dock::-webkit-scrollbar { display: none; }
+.pda-mode .pda-dock button { display: flex; flex: 1 0 54px; min-width: 54px; min-height: 54px; padding: 5px 3px; flex-direction: column; gap: 3px; border: 0; background: transparent; color: #61747a; font-size: 10px; }
+.pda-mode .pda-dock button.active { color: #087f75; background: #eaf5ef; }
+.pda-mode .pda-dock button span { line-height: 1.2; }
+.pda-mode .demo-footer { padding-bottom: 96px; }
 .demo-scan button {
   width: 100%;
   margin-top: 12px;
@@ -1277,6 +1312,18 @@
   .demo-issues .demo-panel {
     margin-bottom: 15px;
   }
+}
+@media (max-width: 760px) {
+  .leadership-demo.pda-mode { display: block; min-height: 100dvh; padding-bottom: env(safe-area-inset-bottom); }
+  .pda-mode .demo-main { width: 100%; box-shadow: none; padding-bottom: 74px; }
+  .pda-mode .demo-heading > .demo-tag { display: none; }
+  .pda-mode .demo-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .pda-mode .demo-hero { padding: 18px; }
+  .pda-mode .demo-hero h2 { font-size: 22px; }
+  .pda-mode .demo-two-col > .demo-action-panel { order: 0; }
+  .pda-mode .demo-flow { flex-wrap: nowrap; overflow-x: auto; }
+  .pda-mode .demo-flow > div { flex: 0 0 145px; }
+  .pda-mode .demo-batch-item { min-height: 56px; }
 }
 @media print {
   body * {

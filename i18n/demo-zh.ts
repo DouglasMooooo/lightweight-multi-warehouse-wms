@@ -1,6 +1,11 @@
 /** Presentation-only Chinese. Business identifiers and domain codes stay unchanged. */
 const entries: Record<string, string> = {
   Overview: "作业总览",
+  "PDA mode": "PDA 模式",
+  "Desktop view": "桌面版",
+  "PDA task navigation": "PDA 作业导航",
+  "Sydney warehouse · operator training": "悉尼仓 · 人员实操培训",
+  "Warehouse operator demo": "仓库人员实操演练",
   "Inbound & Putaway": "收货与上架",
   "Your shift, your tasks, and the next action": "当班任务、处理进度与下一步操作",
   "Receive an ASN, verify serials and put stock away": "核对到货单、验收序列号并完成收货上架",

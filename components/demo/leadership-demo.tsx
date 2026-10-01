@@ -6,6 +6,7 @@ import {
   useEffect,
   useRef,
   useState,
+  useSyncExternalStore,
   type FormEvent,
   type ReactNode,
 } from "react";
@@ -25,6 +26,8 @@ import {
   Warehouse,
   Wrench,
   ClipboardList,
+  Smartphone,
+  Monitor,
 } from "lucide-react";
 import {
   auditDemo,
@@ -77,6 +80,16 @@ const pages = [
   ],
 ] as const;
 type Page = (typeof pages)[number][0];
+const pdaPages = [
+  ["Overview", LayoutDashboard, "首页"],
+  ["Inbound & Putaway", ClipboardList, "收货"],
+  ["Outbound", PackageCheck, "拣货"],
+  ["Digital Pickup", ShieldCheck, "交接"],
+  ["Transfer", Truck, "调拨"],
+  ["Faulty Return", RotateCcw, "退货"],
+  ["Repair → Good", Wrench, "维修"],
+  ["SN Trace", ScanLine, "追溯"],
+] as const;
 const date = (at: string) =>
   new Intl.DateTimeFormat("zh-CN", {
     timeZone: "Australia/Sydney",
@@ -87,6 +100,13 @@ const date = (at: string) =>
     hour12: false,
   }).format(new Date(at));
 const readable = (value: string) => value.replaceAll("_", " ");
+const subscribeToViewport = (onChange: () => void) => {
+  const media = window.matchMedia("(max-width: 760px)");
+  media.addEventListener("change", onChange);
+  return () => media.removeEventListener("change", onChange);
+};
+const getMobileViewport = () => window.matchMedia("(max-width: 760px)").matches;
+const getDesktopViewport = () => false;
 function Panel({
   title,
   children,
@@ -155,6 +175,13 @@ export function LeadershipDemo() {
   const [service] = useState(() => new LeadershipDemoService());
   const [session, setSession] = useState(() => service.read());
   const [page, setPage] = useState<Page>("Overview");
+  const isMobileViewport = useSyncExternalStore(
+    subscribeToViewport,
+    getMobileViewport,
+    getDesktopViewport,
+  );
+  const [pdaModeOverride, setPdaModeOverride] = useState<boolean | null>(null);
+  const pdaMode = pdaModeOverride ?? isMobileViewport;
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(
     null,
   );
@@ -240,6 +267,7 @@ export function LeadershipDemo() {
   function navigate(next: Page) {
     setPage(next);
     setNotice(null);
+    if (pdaMode) window.scrollTo({ top: 0, behavior: "smooth" });
   }
   function reset() {
     setSession(service.reset());
@@ -276,7 +304,7 @@ export function LeadershipDemo() {
       ? "Ready for Pickup"
       : "To prepare";
   return (
-    <div className="leadership-demo" lang="zh-CN">
+    <div className={`leadership-demo ${pdaMode ? "pda-mode" : ""}`} lang="zh-CN">
       <aside className="demo-sidebar">
         <Link className="demo-brand" href="/demo">
           <Warehouse size={30} />
@@ -322,15 +350,22 @@ export function LeadershipDemo() {
             <span>{zh("WMS Workflow Preview")}</span>
             <b>
               {zh(warehouseContext)} <span>/</span>
-              {zh("Leadership demo")}
+              {zh("Warehouse operator demo")}
             </b>
           </div>
-          <button className="demo-reset" onClick={reset}>
-            <RotateCcw size={16} />
-            {zh("Reset Demo")}
-          </button>
+          <div className="demo-topbar-actions">
+            <button className="demo-mode-toggle" onClick={() => setPdaModeOverride(!pdaMode)} aria-pressed={pdaMode}>
+              {pdaMode ? <Monitor size={16} /> : <Smartphone size={16} />}
+              {zh(pdaMode ? "Desktop view" : "PDA mode")}
+            </button>
+            <button className="demo-reset" onClick={reset}>
+              <RotateCcw size={16} />
+              {zh("Reset Demo")}
+            </button>
+          </div>
         </header>
         <main key={generation} className="demo-content">
+          {pdaMode && <div className="pda-shift-strip"><span className="demo-live-dot" />{zh("Sydney warehouse · operator training")}</div>}
           <div className="demo-heading">
             <div>
               <p className="demo-eyebrow">
@@ -2037,6 +2072,16 @@ export function LeadershipDemo() {
             </span>
           </footer>
         </main>
+        {pdaMode && (
+          <nav className="pda-dock" aria-label={zh("PDA task navigation")}>
+            {pdaPages.map(([name, Icon, label]) => (
+              <button key={name} onClick={() => navigate(name)} className={page === name ? "active" : ""} aria-current={page === name ? "page" : undefined} aria-label={zh(name)}>
+                <Icon size={20} />
+                <span>{zh(label)}</span>
+              </button>
+            ))}
+          </nav>
+        )}
       </div>
     </div>
   );
