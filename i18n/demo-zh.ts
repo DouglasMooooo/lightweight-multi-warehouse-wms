@@ -112,7 +112,6 @@ const entries: Record<string, string> = {
   "Prototype / Demo Data": "原型演示 · 模拟数据",
   "Synthetic session · no ERP connection": "独立模拟会话 · 未连接 ERP",
   "Existing operational preview ↗": "打开原业务预览 ↗",
-  "WMS Workflow Preview": "WMS 仓库作业预览",
   "Leadership demo": "管理层演示",
   "Reset Demo": "重置演示",
   "WAREHOUSE EXECUTION /": "仓库作业 /",
