@@ -105,6 +105,7 @@ const entries: Record<string, string> = {
   "To prepare": "待备货",
   Collected: "已领取",
   "WORKFLOW PREVIEW": "仓库作业流程预览",
+  "WMS Workflow Preview": "WMS 仓库作业预览",
   "Consolidated view": "汇总视图",
   "Current task context": "当前作业仓库",
   "Demo workflows": "演示流程导航",
