@@ -24,8 +24,17 @@ interface I18nValue {
 const I18nContext = createContext<I18nValue | null>(null);
 
 export function I18nProvider({ children }: { children: React.ReactNode }) {
-  const [locale, setLocaleState] = useState<Locale>(defaultLocale);
+  const [locale, setLocaleState] = useState<Locale>(
+    typeof window !== "undefined" && window.location.pathname === "/demo"
+      ? "zh-CN"
+      : defaultLocale,
+  );
   useEffect(() => {
+    if (window.location.pathname === "/demo") {
+      persistLocalePreference(window.localStorage, "zh-CN", window.location.pathname);
+      document.documentElement.lang = "zh-CN";
+      return;
+    }
     const stored = window.localStorage.getItem(localeStorageKey);
     // Hydrate the client-only operator preference after the stable SSR default.
     // eslint-disable-next-line react-hooks/set-state-in-effect
